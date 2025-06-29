@@ -1,0 +1,10 @@
+{
+  "esbuild": {
+    "target": "esnext",
+    "format": "esm",
+    "platform": "node",
+    "mainFields": ["module", "main"],
+    "conditions": ["import"],
+    "external": ["yoga-wasm-web"]
+  }
+}

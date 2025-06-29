@@ -1,0 +1,96 @@
+import axios from 'axios';
+import { ToolParametersSchema, type ToolParameters } from '../schemas/tools.js';
+
+export interface SearchResult {
+  title: string;
+  link: string;
+  snippet: string;
+  position: number;
+}
+
+export interface SerperResponse {
+  organic: SearchResult[];
+  answerBox?: {
+    answer: string;
+    title: string;
+    link: string;
+  };
+  knowledgeGraph?: {
+    title: string;
+    description: string;
+  };
+}
+
+export class WebSearchTool {
+  private apiKey: string;
+  private baseUrl = 'https://google.serper.dev/search';
+
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
+  }
+
+  async execute(params: any): Promise<string> {
+    const validatedParams = ToolParametersSchema.parse(params);
+    
+    try {
+      const response = await axios.post<SerperResponse>(
+        this.baseUrl,
+        {
+          q: validatedParams.query,
+          num: validatedParams.num_results,
+        },
+        {
+          headers: {
+            'X-API-KEY': this.apiKey,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        }
+      );
+
+      return this.formatResults(response.data);
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 401) {
+          throw new Error('Invalid Serper API key. Please check your configuration.');
+        }
+        if (error.response?.status === 429) {
+          throw new Error('Serper API rate limit exceeded. Please try again later.');
+        }
+        throw new Error(`Serper API error: ${error.message}`);
+      }
+      throw new Error(`Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private formatResults(data: SerperResponse): string {
+    const results: string[] = [];
+
+    // Add answer box if available
+    if (data.answerBox) {
+      results.push(`**Answer:** ${data.answerBox.answer}`);
+      results.push(`**Source:** ${data.answerBox.title} - ${data.answerBox.link}`);
+      results.push('');
+    }
+
+    // Add knowledge graph if available
+    if (data.knowledgeGraph) {
+      results.push(`**${data.knowledgeGraph.title}**`);
+      results.push(data.knowledgeGraph.description);
+      results.push('');
+    }
+
+    // Add organic results
+    if (data.organic && data.organic.length > 0) {
+      results.push('**Search Results:**');
+      data.organic.forEach((result, index) => {
+        results.push(`${index + 1}. **${result.title}**`);
+        results.push(`   ${result.snippet}`);
+        results.push(`   Link: ${result.link}`);
+        results.push('');
+      });
+    }
+
+    return results.join('\n').trim() || 'No search results found.';
+  }
+}

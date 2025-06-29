@@ -1,0 +1,48 @@
+{
+  "name": "jecko-assistant",
+  "version": "1.0.0",
+  "description": "AI chat assistant CLI with OpenAI, Ink, and tool support",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "jecko": "./bin/jecko"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "chat",
+    "assistant",
+    "openai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "cosmiconfig": "^9.0.0",
+    "ink": "^6.0.1",
+    "marked": "^15.0.0",
+    "marked-terminal": "^7.3.0",
+    "openai": "^4.52.7",
+    "ora": "^8.0.1",
+    "react": "^19.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/marked-terminal": "^6.1.1",
+    "@types/node": "^20.14.9",
+    "@types/react": "^19.1.8",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
