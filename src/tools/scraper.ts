@@ -1,9 +1,6 @@
 import axios from 'axios';
 import { z } from 'zod';
-import {
-  ScrapeUrlParamsSchema,
-  type ScrapeUrlParams,
-} from '../schemas/tools.js';
+import { createTool } from '../utils/toolInfra.js';
 
 const ScrapeResultSchema = z.object({
   url: z.string(),
@@ -15,30 +12,36 @@ const ScrapeResultSchema = z.object({
 
 export type ScrapeResult = z.infer<typeof ScrapeResultSchema>;
 
-export class URLScraperTool {
-  private apiKey: string;
-  private baseUrl = 'https://scrape.serper.dev';
+export const URLScraperTool = createTool({
+  name: 'scrape_url',
+  description:
+    'Scrape content from a specific URL to get more detailed information',
+  schema: z.object({
+    url: z
+      .string()
+      .url()
+      .describe('The URL to scrape content from (must be a valid URL)'),
+    includeMarkdown: z
+      .boolean()
+      .default(true)
+      .describe('Whether to include markdown formatting in the response'),
+  }),
+  execute: async ({ url, includeMarkdown }, config) => {
+    const apiKey = config.serper.apiKey;
+    const baseUrl = 'https://scrape.serper.dev';
 
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  async execute(params: ScrapeUrlParams): Promise<string> {
     try {
-      // Validate input parameters
-      const validatedParams = ScrapeUrlParamsSchema.parse(params);
-
       const requestData = {
-        url: validatedParams.url,
-        includeMarkdown: validatedParams.includeMarkdown,
+        url,
+        includeMarkdown,
       };
 
       const config = {
         method: 'post' as const,
         maxBodyLength: Infinity,
-        url: this.baseUrl,
+        url: baseUrl,
         headers: {
-          'X-API-KEY': this.apiKey,
+          'X-API-KEY': apiKey,
           'Content-Type': 'application/json',
         },
         data: requestData,
@@ -61,7 +64,7 @@ export class URLScraperTool {
         formattedResult += `**Title:** ${result.title}\n\n`;
       }
 
-      if (result.markdown && validatedParams.includeMarkdown) {
+      if (result.markdown && includeMarkdown) {
         formattedResult += `**Content:**\n${result.markdown}`;
       } else if (result.text) {
         formattedResult += `**Content:**\n${result.text}`;
@@ -87,14 +90,9 @@ export class URLScraperTool {
         throw new Error(`Scraping request failed: ${error.message}`);
       }
 
-      if (error instanceof z.ZodError) {
-        const issues = error.issues.map((issue) => issue.message).join(', ');
-        throw new Error(`Invalid scraping parameters: ${issues}`);
-      }
-
       throw new Error(
         `Scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
-  }
-}
+  },
+});

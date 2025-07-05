@@ -1,8 +1,6 @@
 import axios from 'axios';
-import {
-  WebSearchParamsSchema,
-  type WebSearchParams,
-} from '../schemas/tools.js';
+import { z } from 'zod';
+import { createTool } from '../utils/toolInfra.js';
 
 export interface SearchResult {
   title: string;
@@ -24,34 +22,39 @@ export interface SerperResponse {
   };
 }
 
-export class WebSearchTool {
-  private apiKey: string;
-  private baseUrl = 'https://google.serper.dev/search';
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  async execute(params: WebSearchParams): Promise<string> {
-    const validatedParams = WebSearchParamsSchema.parse(params);
+export const WebSearchTool = createTool({
+  name: 'web_search',
+  description: 'Search the web for current information',
+  schema: z.object({
+    query: z.string().min(1).describe('The search query'),
+    num_results: z
+      .number()
+      .positive()
+      .max(20)
+      .default(10)
+      .describe('Number of results to return (1-20)'),
+  }),
+  execute: async ({ query, num_results }, config) => {
+    const apiKey = config.serper.apiKey;
+    const baseUrl = 'https://google.serper.dev/search';
 
     try {
       const response = await axios.post<SerperResponse>(
-        this.baseUrl,
+        baseUrl,
         {
-          q: validatedParams.query,
-          num: validatedParams.num_results,
+          q: query,
+          num: num_results,
         },
         {
           headers: {
-            'X-API-KEY': this.apiKey,
+            'X-API-KEY': apiKey,
             'Content-Type': 'application/json',
           },
           timeout: 10000,
         }
       );
 
-      return this.formatResults(response.data);
+      return formatResults(response.data);
     } catch (error) {
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 401) {
@@ -70,38 +73,38 @@ export class WebSearchTool {
         `Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
+  },
+});
+
+function formatResults(data: SerperResponse): string {
+  const results: string[] = [];
+
+  // Add answer box if available
+  if (data.answerBox) {
+    results.push(`**Answer:** ${data.answerBox.answer}`);
+    results.push(
+      `**Source:** ${data.answerBox.title} - ${data.answerBox.link}`
+    );
+    results.push('');
   }
 
-  private formatResults(data: SerperResponse): string {
-    const results: string[] = [];
-
-    // Add answer box if available
-    if (data.answerBox) {
-      results.push(`**Answer:** ${data.answerBox.answer}`);
-      results.push(
-        `**Source:** ${data.answerBox.title} - ${data.answerBox.link}`
-      );
-      results.push('');
-    }
-
-    // Add knowledge graph if available
-    if (data.knowledgeGraph) {
-      results.push(`**${data.knowledgeGraph.title}**`);
-      results.push(data.knowledgeGraph.description);
-      results.push('');
-    }
-
-    // Add organic results
-    if (data.organic && data.organic.length > 0) {
-      results.push('**Search Results:**');
-      data.organic.forEach((result, index) => {
-        results.push(`${index + 1}. **${result.title}**`);
-        results.push(`   ${result.snippet}`);
-        results.push(`   Link: ${result.link}`);
-        results.push('');
-      });
-    }
-
-    return results.join('\n').trim() || 'No search results found.';
+  // Add knowledge graph if available
+  if (data.knowledgeGraph) {
+    results.push(`**${data.knowledgeGraph.title}**`);
+    results.push(data.knowledgeGraph.description);
+    results.push('');
   }
+
+  // Add organic results
+  if (data.organic && data.organic.length > 0) {
+    results.push('**Search Results:**');
+    data.organic.forEach((result, index) => {
+      results.push(`${index + 1}. **${result.title}**`);
+      results.push(`   ${result.snippet}`);
+      results.push(`   Link: ${result.link}`);
+      results.push('');
+    });
+  }
+
+  return results.join('\n').trim() || 'No search results found.';
 }

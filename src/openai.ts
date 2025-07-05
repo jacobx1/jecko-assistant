@@ -1,10 +1,7 @@
 import OpenAI from 'openai';
 import { Config } from './schemas/config.js';
-import { WebSearchTool } from './tools/serper.js';
-import { URLScraperTool } from './tools/scraper.js';
-import { FileWriterTool } from './tools/fileWriter.js';
-import { TOOL_DEFINITIONS } from './schemas/tools.js';
 import { zodSchemaToOpenAIFunction } from './utils/zodToOpenAI.js';
+import { Tool } from './utils/toolInfra.js';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -30,19 +27,20 @@ export interface StreamingCallbacks {
 export class OpenAIClient {
   private client: OpenAI;
   private config: Config;
-  private webSearchTool: WebSearchTool;
-  private urlScraperTool: URLScraperTool;
-  private fileWriterTool: FileWriterTool;
+  private tools: Map<string, Tool<any, any>>;
 
-  constructor(config: Config) {
+  constructor(config: Config, tools: Tool<any, any>[]) {
     this.config = config;
     this.client = new OpenAI({
       apiKey: config.openai.apiKey,
       baseURL: config.openai.baseURL,
     });
-    this.webSearchTool = new WebSearchTool(config.serper.apiKey);
-    this.urlScraperTool = new URLScraperTool(config.serper.apiKey);
-    this.fileWriterTool = new FileWriterTool();
+
+    // Create a map of tool names to tool instances
+    this.tools = new Map();
+    for (const tool of tools) {
+      this.tools.set(tool.name, tool);
+    }
   }
 
   async chat(
@@ -171,105 +169,45 @@ export class OpenAIClient {
     const toolCallResults = [];
 
     for (const toolCall of toolCalls) {
-      if (toolCall.function.name === 'web_search') {
+      const toolName = toolCall.function.name;
+      const tool = this.tools.get(toolName);
+
+      if (!tool) {
+        console.warn(`Unknown tool: ${toolName}`);
+        continue;
+      }
+
+      try {
+        const params = JSON.parse(toolCall.function.arguments);
+
+        // Notify that we're making a tool call
+        streamingCallbacks?.onToolCall?.(toolName, params);
+
+        const result = await tool.execute(params, this.config);
+        toolCallResults.push({
+          name: toolName,
+          args: params,
+          result: result,
+        });
+      } catch (error) {
+        let args = {};
         try {
-          const params = JSON.parse(toolCall.function.arguments);
-
-          // Notify that we're making a tool call
-          streamingCallbacks?.onToolCall?.('web_search', params);
-
-          const result = await this.webSearchTool.execute(params);
-          toolCallResults.push({
-            name: 'web_search',
-            args: params,
-            result: result,
-          });
-        } catch (error) {
-          let args = {};
-          try {
-            args = JSON.parse(toolCall.function.arguments);
-          } catch (jsonError) {
-            console.error(
-              'Failed to parse tool arguments:',
-              toolCall.function.arguments
-            );
-          }
-
-          // Notify about the tool call even if it fails
-          streamingCallbacks?.onToolCall?.('web_search', args);
-
-          toolCallResults.push({
-            name: 'web_search',
-            args: args,
-            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          });
+          args = JSON.parse(toolCall.function.arguments);
+        } catch (jsonError) {
+          console.error(
+            'Failed to parse tool arguments:',
+            toolCall.function.arguments
+          );
         }
-      } else if (toolCall.function.name === 'scrape_url') {
-        try {
-          const params = JSON.parse(toolCall.function.arguments);
 
-          // Notify that we're making a tool call
-          streamingCallbacks?.onToolCall?.('scrape_url', params);
+        // Notify about the tool call even if it fails
+        streamingCallbacks?.onToolCall?.(toolName, args);
 
-          const result = await this.urlScraperTool.execute(params);
-          toolCallResults.push({
-            name: 'scrape_url',
-            args: params,
-            result: result,
-          });
-        } catch (error) {
-          let args = {};
-          try {
-            args = JSON.parse(toolCall.function.arguments);
-          } catch (jsonError) {
-            console.error(
-              'Failed to parse tool arguments:',
-              toolCall.function.arguments
-            );
-          }
-
-          // Notify about the tool call even if it fails
-          streamingCallbacks?.onToolCall?.('scrape_url', args);
-
-          toolCallResults.push({
-            name: 'scrape_url',
-            args: args,
-            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          });
-        }
-      } else if (toolCall.function.name === 'write_file') {
-        try {
-          const params = JSON.parse(toolCall.function.arguments);
-
-          // Notify that we're making a tool call
-          streamingCallbacks?.onToolCall?.('write_file', params);
-
-          const result = await this.fileWriterTool.execute(params);
-          toolCallResults.push({
-            name: 'write_file',
-            args: params,
-            result: result,
-          });
-        } catch (error) {
-          let args = {};
-          try {
-            args = JSON.parse(toolCall.function.arguments);
-          } catch (jsonError) {
-            console.error(
-              'Failed to parse tool arguments:',
-              toolCall.function.arguments
-            );
-          }
-
-          // Notify about the tool call even if it fails
-          streamingCallbacks?.onToolCall?.('write_file', args);
-
-          toolCallResults.push({
-            name: 'write_file',
-            args: args,
-            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          });
-        }
+        toolCallResults.push({
+          name: toolName,
+          args: args,
+          result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        });
       }
     }
 
@@ -277,7 +215,7 @@ export class OpenAIClient {
     const toolMessage: Message = {
       role: 'assistant',
       content: toolCallResults
-        .map((tc) => `Search results for "${tc.args.query}":\n${tc.result}`)
+        .map((tc) => `Results for "${tc.name}":\n${tc.result}`)
         .join('\n\n'),
     };
 
@@ -341,7 +279,7 @@ export class OpenAIClient {
   }
 
   private getToolDefinitions() {
-    return Object.values(TOOL_DEFINITIONS).map((tool) =>
+    return Array.from(this.tools.values()).map((tool) =>
       zodSchemaToOpenAIFunction(tool.name, tool.description, tool.schema)
     );
   }

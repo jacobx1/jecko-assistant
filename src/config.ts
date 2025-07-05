@@ -1,7 +1,6 @@
 import { cosmiconfig } from 'cosmiconfig';
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync } from 'fs';
 import { ConfigSchema, type Config } from './schemas/config.js';
 
 const CONFIG_NAME = '.jecko.config.json';

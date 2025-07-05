@@ -6,6 +6,9 @@ import { ChatMode, AgentMode } from './modes/index.js';
 import { CommandSelector } from './components/CommandSelector.js';
 import { StreamingText } from './components/StreamingText.js';
 import { getCommand, searchCommands } from './commands/registry.js';
+import { WebSearchTool } from './tools/serper.js';
+import { URLScraperTool } from './tools/scraper.js';
+import { FilerWriterTool } from './tools/fileWriter.js';
 
 export type Mode = 'CHAT' | 'AGENT';
 
@@ -30,7 +33,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [config, setConfig] = useState(initialConfig);
   const [openaiClient, setOpenaiClient] = useState(
-    () => new OpenAIClient(initialConfig)
+    () => new OpenAIClient(initialConfig, [WebSearchTool, URLScraperTool, FilerWriterTool])
   );
   const [showCommandSelector, setShowCommandSelector] = useState(false);
   const [commandQuery, setCommandQuery] = useState('/');
@@ -150,7 +153,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig }) => {
             addMessage('tool', `🔍 Searching: "${args.query}"`, toolName, args);
           } else if (toolName === 'scrape_url') {
             addMessage('tool', `🔧 Scraping: "${args.url}"`, toolName, args);
-          } else if (toolName === 'write_file') {
+          } else if (toolName === 'file_writer') {
             addMessage(
               'tool',
               `💾 Writing: "${args.filename}"`,
@@ -219,7 +222,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig }) => {
 
         const result = await command.execute(config, (newConfig) => {
           setConfig(newConfig);
-          setOpenaiClient(new OpenAIClient(newConfig));
+          setOpenaiClient(new OpenAIClient(newConfig, [WebSearchTool, URLScraperTool, FilerWriterTool]));
           setActiveCommand(null); // Close command after saving
         });
 

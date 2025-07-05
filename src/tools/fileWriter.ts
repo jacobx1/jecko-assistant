@@ -1,22 +1,103 @@
 import fs from 'fs/promises';
 import path from 'path';
-import {
-  WriteFileParamsSchema,
-  type WriteFileParams,
-} from '../schemas/tools.js';
+import { z } from 'zod';
+import { createTool } from '../utils/toolInfra.js';
 
-export class FileWriterTool {
-  constructor() {}
+function validateFilename(filename: string): void {
+  // Check for path traversal attempts
+  if (
+    filename.includes('..') ||
+    filename.includes('/') ||
+    filename.includes('\\')
+  ) {
+    throw new Error(
+      'Filename cannot contain path separators or parent directory references'
+    );
+  }
 
-  async execute(params: WriteFileParams): Promise<string> {
+  // Check for reserved names on Windows
+  const reservedNames = [
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'LPT1',
+    'LPT2',
+    'LPT3',
+    'LPT4',
+    'LPT5',
+    'LPT6',
+    'LPT7',
+    'LPT8',
+    'LPT9',
+  ];
+  const nameWithoutExt = path.parse(filename).name.toUpperCase();
+  if (reservedNames.includes(nameWithoutExt)) {
+    throw new Error(
+      `Filename cannot be a reserved system name: ${nameWithoutExt}`
+    );
+  }
+
+  // Check for invalid characters
+  const invalidChars = /[<>:"|?*\x00-\x1f]/;
+  if (invalidChars.test(filename)) {
+    throw new Error('Filename contains invalid characters');
+  }
+}
+
+function rethrowReadableError(error: unknown): never {
+  if (error instanceof Error && 'code' in error) {
+    // Handle specific filesystem errors
+    if (error.code === 'EACCES') {
+      throw new Error(
+        'Permission denied: Cannot write to the specified location'
+      );
+    }
+    if (error.code === 'ENOENT') {
+      throw new Error('Directory does not exist and could not be created');
+    }
+    if (error.code === 'ENOSPC') {
+      throw new Error('No space left on device');
+    }
+    if (error.code === 'EMFILE' || error.code === 'ENFILE') {
+      throw new Error('Too many open files');
+    }
+  }
+
+  throw new Error(
+    `File writing failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+  );
+}
+
+export const FilerWriterTool = createTool({
+  name: 'file_writer',
+  description: 'Write content to a file on the local filesystem',
+  schema: z.object({
+    filename: z
+      .string()
+      .min(1)
+      .describe('The name of the file to write (including extension)'),
+    content: z.string().describe('The content to write to the file'),
+    directory: z
+      .string()
+      .default('.')
+      .describe(
+        'The directory to write the file to (defaults to current directory)'
+      ),
+  }),
+  execute: async ({ filename, content, directory }) => {
     try {
-      // Validate input parameters
-      const validatedParams = WriteFileParamsSchema.parse(params);
-
-      const { filename, content, directory } = validatedParams;
-
       // Validate filename for security
-      this.validateFilename(filename);
+      validateFilename(filename);
 
       // Ensure directory exists
       try {
@@ -62,86 +143,7 @@ export class FileWriterTool {
 
 The file has been saved with the specified content.`;
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        const issues = error.issues.map((issue) => issue.message).join(', ');
-        throw new Error(`Invalid file writing parameters: ${issues}`);
-      }
-
-      if (error instanceof Error) {
-        // Handle specific filesystem errors
-        if (error.code === 'EACCES') {
-          throw new Error(
-            'Permission denied: Cannot write to the specified location'
-          );
-        }
-        if (error.code === 'ENOENT') {
-          throw new Error('Directory does not exist and could not be created');
-        }
-        if (error.code === 'ENOSPC') {
-          throw new Error('No space left on device');
-        }
-        if (error.code === 'EMFILE' || error.code === 'ENFILE') {
-          throw new Error('Too many open files');
-        }
-      }
-
-      throw new Error(
-        `File writing failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      rethrowReadableError(error);
     }
-  }
-
-  /**
-   * Helper method to validate filename for security
-   */
-  private validateFilename(filename: string): void {
-    // Check for path traversal attempts
-    if (
-      filename.includes('..') ||
-      filename.includes('/') ||
-      filename.includes('\\')
-    ) {
-      throw new Error(
-        'Filename cannot contain path separators or parent directory references'
-      );
-    }
-
-    // Check for reserved names on Windows
-    const reservedNames = [
-      'CON',
-      'PRN',
-      'AUX',
-      'NUL',
-      'COM1',
-      'COM2',
-      'COM3',
-      'COM4',
-      'COM5',
-      'COM6',
-      'COM7',
-      'COM8',
-      'COM9',
-      'LPT1',
-      'LPT2',
-      'LPT3',
-      'LPT4',
-      'LPT5',
-      'LPT6',
-      'LPT7',
-      'LPT8',
-      'LPT9',
-    ];
-    const nameWithoutExt = path.parse(filename).name.toUpperCase();
-    if (reservedNames.includes(nameWithoutExt)) {
-      throw new Error(
-        `Filename cannot be a reserved system name: ${nameWithoutExt}`
-      );
-    }
-
-    // Check for invalid characters
-    const invalidChars = /[<>:"|?*\x00-\x1f]/;
-    if (invalidChars.test(filename)) {
-      throw new Error('Filename contains invalid characters');
-    }
-  }
-}
+  },
+});
