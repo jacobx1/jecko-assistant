@@ -1,7 +1,7 @@
 import React, { useState, useEffect, use } from 'react';
 import { Text } from 'ink';
 import { marked } from 'marked';
-import { markedTerminal} from 'marked-terminal';
+import { markedTerminal } from 'marked-terminal';
 
 marked.use(markedTerminal() as any);
 
@@ -10,10 +10,12 @@ interface StreamingTextProps {
   isComplete?: boolean;
 }
 
-export const StreamingText: React.FC<StreamingTextProps> = ({
-  text,
-}) => {
-  return <Text>{marked.parse(text, {
-    async: false
-  })}</Text>;
+export const StreamingText: React.FC<StreamingTextProps> = ({ text }) => {
+  return (
+    <Text>
+      {marked.parse(text, {
+        async: false,
+      })}
+    </Text>
+  );
 };

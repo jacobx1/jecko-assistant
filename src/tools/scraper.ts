@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { z } from 'zod';
-import { ScrapeUrlParamsSchema, type ScrapeUrlParams } from '../schemas/tools.js';
+import {
+  ScrapeUrlParamsSchema,
+  type ScrapeUrlParams,
+} from '../schemas/tools.js';
 
 const ScrapeResultSchema = z.object({
   url: z.string(),
@@ -43,21 +46,21 @@ export class URLScraperTool {
       };
 
       const response = await axios.request(config);
-      
+
       // Validate response structure
       const result = ScrapeResultSchema.parse(response.data);
-      
+
       if (result.error) {
         throw new Error(`Scraping failed: ${result.error}`);
       }
 
       // Format the response for the LLM
       let formattedResult = `**URL:** ${result.url}\n`;
-      
+
       if (result.title) {
         formattedResult += `**Title:** ${result.title}\n\n`;
       }
-      
+
       if (result.markdown && validatedParams.includeMarkdown) {
         formattedResult += `**Content:**\n${result.markdown}`;
       } else if (result.text) {
@@ -67,7 +70,6 @@ export class URLScraperTool {
       }
 
       return formattedResult;
-
     } catch (error) {
       if (axios.isAxiosError(error)) {
         if (error.code === 'ECONNABORTED') {
@@ -84,13 +86,15 @@ export class URLScraperTool {
         }
         throw new Error(`Scraping request failed: ${error.message}`);
       }
-      
+
       if (error instanceof z.ZodError) {
-        const issues = error.issues.map(issue => issue.message).join(', ');
+        const issues = error.issues.map((issue) => issue.message).join(', ');
         throw new Error(`Invalid scraping parameters: ${issues}`);
       }
-      
-      throw new Error(`Scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+
+      throw new Error(
+        `Scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 }

@@ -11,7 +11,8 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write ."
   },
   "keywords": [
     "cli",
@@ -39,6 +40,7 @@
     "@types/marked-terminal": "^6.1.1",
     "@types/node": "^20.14.9",
     "@types/react": "^19.1.8",
+    "prettier": "^3.6.2",
     "tsx": "^4.16.0",
     "typescript": "^5.5.2"
   },

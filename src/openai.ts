@@ -45,10 +45,15 @@ export class OpenAIClient {
     this.fileWriterTool = new FileWriterTool();
   }
 
-  async chat(messages: Message[], useTools: boolean = false, streamingCallbacks?: StreamingCallbacks): Promise<ChatResponse> {
+  async chat(
+    messages: Message[],
+    useTools: boolean = false,
+    streamingCallbacks?: StreamingCallbacks
+  ): Promise<ChatResponse> {
     const systemMessage: Message = {
       role: 'system',
-      content: 'You are Jecko, a helpful AI assistant. Use tools when needed to provide accurate and up-to-date information.',
+      content:
+        'You are Jecko, a helpful AI assistant. Use tools when needed to provide accurate and up-to-date information.',
     };
 
     const allMessages = [systemMessage, ...messages];
@@ -58,7 +63,7 @@ export class OpenAIClient {
         // Streaming mode
         const stream = await this.client.chat.completions.create({
           model: this.config.openai.model,
-          messages: allMessages.map(msg => ({
+          messages: allMessages.map((msg) => ({
             role: msg.role,
             content: msg.content,
           })),
@@ -75,12 +80,12 @@ export class OpenAIClient {
 
         for await (const chunk of stream) {
           const delta = chunk.choices[0]?.delta;
-          
+
           if (delta?.content) {
             fullContent += delta.content;
             streamingCallbacks.onToken?.(delta.content);
           }
-          
+
           if (delta?.tool_calls) {
             for (const toolCall of delta.tool_calls) {
               const index = toolCall.index;
@@ -88,16 +93,18 @@ export class OpenAIClient {
                 accumulatedToolCalls[index] = {
                   id: toolCall.id,
                   type: toolCall.type,
-                  function: { name: '', arguments: '' }
+                  function: { name: '', arguments: '' },
                 };
               }
-              
+
               if (toolCall.function?.name) {
-                accumulatedToolCalls[index].function.name += toolCall.function.name;
+                accumulatedToolCalls[index].function.name +=
+                  toolCall.function.name;
               }
-              
+
               if (toolCall.function?.arguments) {
-                accumulatedToolCalls[index].function.arguments += toolCall.function.arguments;
+                accumulatedToolCalls[index].function.arguments +=
+                  toolCall.function.arguments;
               }
             }
           }
@@ -108,20 +115,24 @@ export class OpenAIClient {
 
         // Handle tool calls if any - DON'T call onComplete yet if we have tool calls
         if (toolCalls.length > 0) {
-          return await this.handleToolCalls(toolCalls, allMessages, streamingCallbacks);
+          return await this.handleToolCalls(
+            toolCalls,
+            allMessages,
+            streamingCallbacks
+          );
         }
 
         // Only call onComplete if we don't have tool calls
         streamingCallbacks.onComplete?.();
 
         return {
-          content: fullContent || 'No response content'
+          content: fullContent || 'No response content',
         };
       } else {
         // Non-streaming mode (existing code)
         const completion = await this.client.chat.completions.create({
           model: this.config.openai.model,
-          messages: allMessages.map(msg => ({
+          messages: allMessages.map((msg) => ({
             role: msg.role,
             content: msg.content,
           })),
@@ -142,106 +153,121 @@ export class OpenAIClient {
         }
 
         return {
-          content: message.content || 'No response content'
+          content: message.content || 'No response content',
         };
       }
     } catch (error) {
-      throw new Error(`OpenAI API error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `OpenAI API error: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
-  private async handleToolCalls(toolCalls: any[], messages: Message[], streamingCallbacks?: StreamingCallbacks): Promise<ChatResponse> {
+  private async handleToolCalls(
+    toolCalls: any[],
+    messages: Message[],
+    streamingCallbacks?: StreamingCallbacks
+  ): Promise<ChatResponse> {
     const toolCallResults = [];
 
     for (const toolCall of toolCalls) {
       if (toolCall.function.name === 'web_search') {
         try {
           const params = JSON.parse(toolCall.function.arguments);
-          
+
           // Notify that we're making a tool call
           streamingCallbacks?.onToolCall?.('web_search', params);
-          
+
           const result = await this.webSearchTool.execute(params);
           toolCallResults.push({
             name: 'web_search',
             args: params,
-            result: result
+            result: result,
           });
         } catch (error) {
           let args = {};
           try {
             args = JSON.parse(toolCall.function.arguments);
           } catch (jsonError) {
-            console.error('Failed to parse tool arguments:', toolCall.function.arguments);
+            console.error(
+              'Failed to parse tool arguments:',
+              toolCall.function.arguments
+            );
           }
-          
+
           // Notify about the tool call even if it fails
           streamingCallbacks?.onToolCall?.('web_search', args);
-          
+
           toolCallResults.push({
             name: 'web_search',
             args: args,
-            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
           });
         }
       } else if (toolCall.function.name === 'scrape_url') {
         try {
           const params = JSON.parse(toolCall.function.arguments);
-          
+
           // Notify that we're making a tool call
           streamingCallbacks?.onToolCall?.('scrape_url', params);
-          
+
           const result = await this.urlScraperTool.execute(params);
           toolCallResults.push({
             name: 'scrape_url',
             args: params,
-            result: result
+            result: result,
           });
         } catch (error) {
           let args = {};
           try {
             args = JSON.parse(toolCall.function.arguments);
           } catch (jsonError) {
-            console.error('Failed to parse tool arguments:', toolCall.function.arguments);
+            console.error(
+              'Failed to parse tool arguments:',
+              toolCall.function.arguments
+            );
           }
-          
+
           // Notify about the tool call even if it fails
           streamingCallbacks?.onToolCall?.('scrape_url', args);
-          
+
           toolCallResults.push({
             name: 'scrape_url',
             args: args,
-            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
           });
         }
       } else if (toolCall.function.name === 'write_file') {
         try {
           const params = JSON.parse(toolCall.function.arguments);
-          
+
           // Notify that we're making a tool call
           streamingCallbacks?.onToolCall?.('write_file', params);
-          
+
           const result = await this.fileWriterTool.execute(params);
           toolCallResults.push({
             name: 'write_file',
             args: params,
-            result: result
+            result: result,
           });
         } catch (error) {
           let args = {};
           try {
             args = JSON.parse(toolCall.function.arguments);
           } catch (jsonError) {
-            console.error('Failed to parse tool arguments:', toolCall.function.arguments);
+            console.error(
+              'Failed to parse tool arguments:',
+              toolCall.function.arguments
+            );
           }
-          
+
           // Notify about the tool call even if it fails
           streamingCallbacks?.onToolCall?.('write_file', args);
-          
+
           toolCallResults.push({
             name: 'write_file',
             args: args,
-            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
           });
         }
       }
@@ -250,7 +276,9 @@ export class OpenAIClient {
     // Create a follow-up message with tool results
     const toolMessage: Message = {
       role: 'assistant',
-      content: toolCallResults.map(tc => `Search results for "${tc.args.query}":\n${tc.result}`).join('\n\n')
+      content: toolCallResults
+        .map((tc) => `Search results for "${tc.args.query}":\n${tc.result}`)
+        .join('\n\n'),
     };
 
     const updatedMessages = [...messages, toolMessage];
@@ -259,11 +287,11 @@ export class OpenAIClient {
     if (streamingCallbacks) {
       // Signal that we need a new message for the follow-up response
       streamingCallbacks.onNewMessage?.();
-      
+
       // Use streaming for the follow-up response too
       const stream = await this.client.chat.completions.create({
         model: this.config.openai.model,
-        messages: updatedMessages.map(msg => ({
+        messages: updatedMessages.map((msg) => ({
           role: msg.role,
           content: msg.content,
         })),
@@ -286,13 +314,13 @@ export class OpenAIClient {
 
       return {
         content: finalContent || 'No response content',
-        toolCalls: toolCallResults
+        toolCalls: toolCallResults,
       };
     } else {
       // Non-streaming follow-up
       const finalCompletion = await this.client.chat.completions.create({
         model: this.config.openai.model,
-        messages: updatedMessages.map(msg => ({
+        messages: updatedMessages.map((msg) => ({
           role: msg.role,
           content: msg.content,
         })),
@@ -301,8 +329,9 @@ export class OpenAIClient {
       });
 
       return {
-        content: finalCompletion.choices[0]?.message?.content || 'No response content',
-        toolCalls: toolCallResults
+        content:
+          finalCompletion.choices[0]?.message?.content || 'No response content',
+        toolCalls: toolCallResults,
       };
     }
   }
@@ -312,7 +341,7 @@ export class OpenAIClient {
   }
 
   private getToolDefinitions() {
-    return Object.values(TOOL_DEFINITIONS).map(tool => 
+    return Object.values(TOOL_DEFINITIONS).map((tool) =>
       zodSchemaToOpenAIFunction(tool.name, tool.description, tool.schema)
     );
   }

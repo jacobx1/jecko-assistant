@@ -17,18 +17,20 @@ if (fs.existsSync(mainScript)) {
   // Development: use tsx to run TypeScript directly
   const tsxPath = path.join(projectRoot, 'node_modules', '.bin', 'tsx');
   const srcScript = path.join(projectRoot, 'src', 'index.ts');
-  
+
   if (fs.existsSync(tsxPath)) {
     const child = spawn(tsxPath, [srcScript, ...process.argv.slice(2)], {
       stdio: 'inherit',
-      cwd: projectRoot
+      cwd: projectRoot,
     });
-    
+
     child.on('exit', (code) => {
       process.exit(code || 0);
     });
   } else {
-    console.error('Error: Neither built version nor tsx found. Please run "npm install" first.');
+    console.error(
+      'Error: Neither built version nor tsx found. Please run "npm install" first.'
+    );
     process.exit(1);
   }
 }

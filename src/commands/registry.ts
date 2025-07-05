@@ -1,9 +1,7 @@
 import { type SlashCommand, type CommandMatch } from './types.js';
 import { configCommand } from './config.js';
 
-const commands: SlashCommand[] = [
-  configCommand,
-];
+const commands: SlashCommand[] = [configCommand];
 
 export function getAllCommands(): SlashCommand[] {
   return [...commands];
@@ -17,19 +15,19 @@ export function searchCommands(query: string): CommandMatch[] {
   }
 
   const searchTerm = query.slice(1).toLowerCase();
-  
+
   if (searchTerm === '') {
-    return commands.map(command => ({ command, score: 1 }));
+    return commands.map((command) => ({ command, score: 1 }));
   }
 
   const matches: CommandMatch[] = [];
-  
+
   for (const command of commands) {
     const name = command.name.toLowerCase();
     const description = command.description.toLowerCase();
-    
+
     let score = 0;
-    
+
     // Exact match gets highest score
     if (name === searchTerm) {
       score = 100;
@@ -46,15 +44,15 @@ export function searchCommands(query: string): CommandMatch[] {
     else if (description.includes(searchTerm)) {
       score = 40;
     }
-    
+
     if (score > 0) {
       matches.push({ command, score });
     }
   }
-  
+
   return matches.sort((a, b) => b.score - a.score);
 }
 
 export function getCommand(name: string): SlashCommand | undefined {
-  return commands.find(cmd => cmd.name === name);
+  return commands.find((cmd) => cmd.name === name);
 }

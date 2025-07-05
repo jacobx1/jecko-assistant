@@ -24,7 +24,10 @@ program
       const config = await loadConfig();
       render(React.createElement(ChatApp, { config }));
     } catch (error) {
-      console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error');
+      console.error(
+        chalk.red('Error:'),
+        error instanceof Error ? error.message : 'Unknown error'
+      );
       console.log(chalk.yellow('\nTo create a sample config file, run:'));
       console.log(chalk.cyan('jecko config --init'));
       process.exit(1);
@@ -41,8 +44,13 @@ program
       const configPath = join(process.cwd(), '.jecko.config.json');
       try {
         writeFileSync(configPath, createSampleConfig());
-        console.log(chalk.green('✓'), `Sample config created at: ${configPath}`);
-        console.log(chalk.yellow('Please edit the file and add your API keys.'));
+        console.log(
+          chalk.green('✓'),
+          `Sample config created at: ${configPath}`
+        );
+        console.log(
+          chalk.yellow('Please edit the file and add your API keys.')
+        );
       } catch (error) {
         console.error(chalk.red('Error creating config:'), error);
         process.exit(1);
@@ -51,13 +59,22 @@ program
       try {
         const config = await loadConfig();
         console.log(chalk.green('Current configuration:'));
-        console.log(JSON.stringify({
-          ...config,
-          openai: { ...config.openai, apiKey: '***' },
-          serper: { ...config.serper, apiKey: '***' },
-        }, null, 2));
+        console.log(
+          JSON.stringify(
+            {
+              ...config,
+              openai: { ...config.openai, apiKey: '***' },
+              serper: { ...config.serper, apiKey: '***' },
+            },
+            null,
+            2
+          )
+        );
       } catch (error) {
-        console.error(chalk.red('Error loading config:'), error instanceof Error ? error.message : 'Unknown error');
+        console.error(
+          chalk.red('Error loading config:'),
+          error instanceof Error ? error.message : 'Unknown error'
+        );
         process.exit(1);
       }
     } else {

@@ -1,16 +1,24 @@
-import { OpenAIClient, Message, ChatResponse, StreamingCallbacks } from '../openai.js';
+import {
+  OpenAIClient,
+  Message,
+  ChatResponse,
+  StreamingCallbacks,
+} from '../openai.js';
 
 export class AgentMode {
   static async execute(
     client: OpenAIClient,
-    previousMessages: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }>,
+    previousMessages: Array<{
+      role: 'user' | 'assistant' | 'tool';
+      content: string;
+    }>,
     userInput: string,
     streamingCallbacks?: StreamingCallbacks
   ): Promise<ChatResponse> {
     const messages: Message[] = [
       ...previousMessages
-        .filter(msg => msg.role !== 'tool') // Filter out tool messages for OpenAI
-        .map(msg => ({
+        .filter((msg) => msg.role !== 'tool') // Filter out tool messages for OpenAI
+        .map((msg) => ({
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
         })),
@@ -27,7 +35,11 @@ export class AgentMode {
     const maxIterations = 5; // Prevent infinite loops
 
     while (iteration < maxIterations) {
-      const result = await client.chat(currentMessages, true, streamingCallbacks);
+      const result = await client.chat(
+        currentMessages,
+        true,
+        streamingCallbacks
+      );
       responses.push(result.content);
 
       // Collect tool calls
@@ -49,7 +61,8 @@ export class AgentMode {
       // Add a follow-up prompt to continue the conversation
       currentMessages.push({
         role: 'user',
-        content: 'Please continue with any additional analysis or actions needed based on the information gathered.',
+        content:
+          'Please continue with any additional analysis or actions needed based on the information gathered.',
       });
 
       iteration++;
@@ -61,7 +74,7 @@ export class AgentMode {
 
     return {
       content: responses.join('\n\n'),
-      toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined
+      toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
     };
   }
 }

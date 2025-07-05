@@ -42,9 +42,12 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
 
     for (const [key, fieldSchema] of Object.entries(shape)) {
       properties[key] = zodSchemaToOpenAIProperty(fieldSchema as z.ZodTypeAny);
-      
+
       // Check if field is required (not optional or has default)
-      if (!(fieldSchema instanceof z.ZodOptional) && !(fieldSchema instanceof z.ZodDefault)) {
+      if (
+        !(fieldSchema instanceof z.ZodOptional) &&
+        !(fieldSchema instanceof z.ZodDefault)
+      ) {
         required.push(key);
       }
     }
@@ -52,7 +55,7 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
     return {
       type: 'object',
       properties,
-      required
+      required,
     };
   }
 
@@ -90,7 +93,7 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
   if (schema instanceof z.ZodArray) {
     const property: OpenAIProperty = {
       type: 'array',
-      items: zodSchemaToOpenAIProperty(schema.element)
+      items: zodSchemaToOpenAIProperty(schema.element),
     };
     const description = getZodDescription(schema);
     if (description) {
@@ -103,7 +106,7 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
   if (schema instanceof z.ZodEnum) {
     const property: OpenAIProperty = {
       type: 'string',
-      enum: schema.options
+      enum: schema.options,
     };
     const description = getZodDescription(schema);
     if (description) {
@@ -121,9 +124,10 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
   if (schema instanceof z.ZodDefault) {
     const property = zodSchemaToOpenAIProperty(schema.removeDefault());
     property.default = schema._def.defaultValue();
-    
+
     // Try to get description from the ZodDefault itself first, then from inner schema
-    const description = getZodDescription(schema) || getZodDescription(schema.removeDefault());
+    const description =
+      getZodDescription(schema) || getZodDescription(schema.removeDefault());
     if (description) {
       property.description = description;
     }
@@ -151,7 +155,7 @@ export function zodSchemaToOpenAIFunction(
   schema: z.ZodObject<any>
 ): OpenAIFunctionDefinition {
   const parametersSchema = zodSchemaToOpenAIProperty(schema);
-  
+
   return {
     type: 'function',
     function: {
@@ -160,9 +164,9 @@ export function zodSchemaToOpenAIFunction(
       parameters: {
         type: 'object',
         properties: parametersSchema.properties || {},
-        required: parametersSchema.required || []
-      }
-    }
+        required: parametersSchema.required || [],
+      },
+    },
   };
 }
 
@@ -175,7 +179,10 @@ export function getRequiredFields(schema: z.ZodObject<any>): string[] {
 
   for (const [key, fieldSchema] of Object.entries(shape)) {
     // Check if field is required (not optional or has default)
-    if (!(fieldSchema instanceof z.ZodOptional) && !(fieldSchema instanceof z.ZodDefault)) {
+    if (
+      !(fieldSchema instanceof z.ZodOptional) &&
+      !(fieldSchema instanceof z.ZodDefault)
+    ) {
       required.push(key);
     }
   }

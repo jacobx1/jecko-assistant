@@ -1,5 +1,8 @@
 import axios from 'axios';
-import { WebSearchParamsSchema, type WebSearchParams } from '../schemas/tools.js';
+import {
+  WebSearchParamsSchema,
+  type WebSearchParams,
+} from '../schemas/tools.js';
 
 export interface SearchResult {
   title: string;
@@ -31,7 +34,7 @@ export class WebSearchTool {
 
   async execute(params: WebSearchParams): Promise<string> {
     const validatedParams = WebSearchParamsSchema.parse(params);
-    
+
     try {
       const response = await axios.post<SerperResponse>(
         this.baseUrl,
@@ -52,14 +55,20 @@ export class WebSearchTool {
     } catch (error) {
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 401) {
-          throw new Error('Invalid Serper API key. Please check your configuration.');
+          throw new Error(
+            'Invalid Serper API key. Please check your configuration.'
+          );
         }
         if (error.response?.status === 429) {
-          throw new Error('Serper API rate limit exceeded. Please try again later.');
+          throw new Error(
+            'Serper API rate limit exceeded. Please try again later.'
+          );
         }
         throw new Error(`Serper API error: ${error.message}`);
       }
-      throw new Error(`Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
@@ -69,7 +78,9 @@ export class WebSearchTool {
     // Add answer box if available
     if (data.answerBox) {
       results.push(`**Answer:** ${data.answerBox.answer}`);
-      results.push(`**Source:** ${data.answerBox.title} - ${data.answerBox.link}`);
+      results.push(
+        `**Source:** ${data.answerBox.title} - ${data.answerBox.link}`
+      );
       results.push('');
     }
 

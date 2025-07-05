@@ -43,15 +43,15 @@ export const CommandSelector: React.FC<CommandSelectorProps> = ({
         <Text>{query.slice(1)}</Text>
         <Text color="gray">█</Text>
       </Box>
-      
+
       <Box flexDirection="column">
         {matches.map((match, index) => {
-          const isSelected = index === selectedIndex && selectedIndex < matches.length;
+          const isSelected =
+            index === selectedIndex && selectedIndex < matches.length;
           return (
             <Box key={match.command.name} paddingX={1}>
               <Text color={isSelected ? 'green' : 'white'}>
-                {isSelected ? '> ' : '  '}
-                /{match.command.name}
+                {isSelected ? '> ' : '  '}/{match.command.name}
               </Text>
               <Text color="gray"> - {match.command.description}</Text>
             </Box>
@@ -60,9 +60,7 @@ export const CommandSelector: React.FC<CommandSelectorProps> = ({
       </Box>
 
       <Box marginTop={1}>
-        <Text color="gray">
-          ↑↓ Navigate • Enter: Select • Esc: Cancel
-        </Text>
+        <Text color="gray">↑↓ Navigate • Enter: Select • Esc: Cancel</Text>
       </Box>
     </Box>
   );

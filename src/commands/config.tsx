@@ -11,12 +11,22 @@ interface ConfigFormProps {
   onCancel: () => void;
 }
 
-const ConfigForm: React.FC<ConfigFormProps> = ({ config, onSave, onCancel }) => {
+const ConfigForm: React.FC<ConfigFormProps> = ({
+  config,
+  onSave,
+  onCancel,
+}) => {
   const [currentField, setCurrentField] = useState(0);
   const [formData, setFormData] = useState({
-    openaiApiKey: config.openai.apiKey === 'sk-your-openai-api-key-here' ? '' : config.openai.apiKey,
+    openaiApiKey:
+      config.openai.apiKey === 'sk-your-openai-api-key-here'
+        ? ''
+        : config.openai.apiKey,
     openaiModel: config.openai.model,
-    serperApiKey: config.serper.apiKey === 'your-serper-api-key-here' ? '' : config.serper.apiKey,
+    serperApiKey:
+      config.serper.apiKey === 'your-serper-api-key-here'
+        ? ''
+        : config.serper.apiKey,
     maxTokens: config.maxTokens.toString(),
     temperature: config.temperature.toString(),
   });
@@ -24,7 +34,11 @@ const ConfigForm: React.FC<ConfigFormProps> = ({ config, onSave, onCancel }) => 
   const fields = [
     { key: 'openaiApiKey', label: 'OpenAI API Key', placeholder: 'sk-...' },
     { key: 'openaiModel', label: 'OpenAI Model', placeholder: 'gpt-4' },
-    { key: 'serperApiKey', label: 'Serper API Key', placeholder: 'your-serper-key' },
+    {
+      key: 'serperApiKey',
+      label: 'Serper API Key',
+      placeholder: 'your-serper-key',
+    },
     { key: 'maxTokens', label: 'Max Tokens', placeholder: '4000' },
     { key: 'temperature', label: 'Temperature', placeholder: '0.7' },
   ];
@@ -68,13 +82,13 @@ const ConfigForm: React.FC<ConfigFormProps> = ({ config, onSave, onCancel }) => 
       onCancel();
     } else if (key.backspace || key.delete) {
       const fieldKey = fields[currentField].key as keyof typeof formData;
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
         [fieldKey]: prev[fieldKey].slice(0, -1),
       }));
     } else if (input && !key.ctrl && !key.meta) {
       const fieldKey = fields[currentField].key as keyof typeof formData;
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
         [fieldKey]: prev[fieldKey] + input,
       }));
@@ -84,22 +98,29 @@ const ConfigForm: React.FC<ConfigFormProps> = ({ config, onSave, onCancel }) => 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1}>
       <Box marginBottom={1}>
-        <Text bold color="cyan">⚙️  Configuration</Text>
+        <Text bold color="cyan">
+          ⚙️ Configuration
+        </Text>
       </Box>
-      
+
       {fields.map((field, index) => {
         const isActive = index === currentField;
         const value = formData[field.key as keyof typeof formData];
         const isPassword = field.key.toLowerCase().includes('key');
-        
+
         return (
           <Box key={field.key} marginBottom={1}>
             <Box width={20}>
               <Text color={isActive ? 'green' : 'gray'}>
-                {isActive ? '> ' : '  '}{field.label}:
+                {isActive ? '> ' : '  '}
+                {field.label}:
               </Text>
             </Box>
-            <Box flexGrow={1} borderStyle={isActive ? 'single' : undefined} paddingX={1}>
+            <Box
+              flexGrow={1}
+              borderStyle={isActive ? 'single' : undefined}
+              paddingX={1}
+            >
               <Text>
                 {isPassword && value ? '•'.repeat(value.length) : value}
                 {isActive && <Text color="gray">█</Text>}
@@ -110,15 +131,11 @@ const ConfigForm: React.FC<ConfigFormProps> = ({ config, onSave, onCancel }) => 
       })}
 
       <Box marginTop={1} marginBottom={1}>
-        <Text color="gray">
-          ↑↓ Navigate • Enter: Next/Save • Esc: Cancel
-        </Text>
+        <Text color="gray">↑↓ Navigate • Enter: Next/Save • Esc: Cancel</Text>
       </Box>
 
       <Box>
-        <Text color="yellow">
-          Current field: {fields[currentField].label}
-        </Text>
+        <Text color="yellow">Current field: {fields[currentField].label}</Text>
       </Box>
     </Box>
   );
@@ -127,15 +144,20 @@ const ConfigForm: React.FC<ConfigFormProps> = ({ config, onSave, onCancel }) => 
 export const configCommand: SlashCommand = {
   name: 'config',
   description: 'Configure API keys and settings',
-  execute: async (config: Config, onConfigUpdate?: (newConfig: Config) => void) => {
-    return <ConfigForm 
-      config={config} 
-      onSave={(newConfig: Config) => {
-        onConfigUpdate?.(newConfig);
-      }} 
-      onCancel={() => {
-        onConfigUpdate?.(config); // Signal to close without changes
-      }} 
-    />;
+  execute: async (
+    config: Config,
+    onConfigUpdate?: (newConfig: Config) => void
+  ) => {
+    return (
+      <ConfigForm
+        config={config}
+        onSave={(newConfig: Config) => {
+          onConfigUpdate?.(newConfig);
+        }}
+        onCancel={() => {
+          onConfigUpdate?.(config); // Signal to close without changes
+        }}
+      />
+    );
   },
 };
