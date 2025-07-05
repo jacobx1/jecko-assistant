@@ -1,6 +1,10 @@
 import OpenAI from 'openai';
 import { Config } from './schemas/config.js';
 import { WebSearchTool } from './tools/serper.js';
+import { URLScraperTool } from './tools/scraper.js';
+import { FileWriterTool } from './tools/fileWriter.js';
+import { TOOL_DEFINITIONS } from './schemas/tools.js';
+import { zodSchemaToOpenAIFunction } from './utils/zodToOpenAI.js';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -19,12 +23,16 @@ export interface ChatResponse {
 export interface StreamingCallbacks {
   onToken?: (token: string) => void;
   onComplete?: () => void;
+  onToolCall?: (toolName: string, args: any) => void;
+  onNewMessage?: () => void; // Called when starting a new assistant message
 }
 
 export class OpenAIClient {
   private client: OpenAI;
   private config: Config;
-  private tools: WebSearchTool;
+  private webSearchTool: WebSearchTool;
+  private urlScraperTool: URLScraperTool;
+  private fileWriterTool: FileWriterTool;
 
   constructor(config: Config) {
     this.config = config;
@@ -32,7 +40,9 @@ export class OpenAIClient {
       apiKey: config.openai.apiKey,
       baseURL: config.openai.baseURL,
     });
-    this.tools = new WebSearchTool(config.serper.apiKey);
+    this.webSearchTool = new WebSearchTool(config.serper.apiKey);
+    this.urlScraperTool = new URLScraperTool(config.serper.apiKey);
+    this.fileWriterTool = new FileWriterTool();
   }
 
   async chat(messages: Message[], useTools: boolean = false, streamingCallbacks?: StreamingCallbacks): Promise<ChatResponse> {
@@ -61,6 +71,7 @@ export class OpenAIClient {
 
         let fullContent = '';
         let toolCalls: any[] = [];
+        let accumulatedToolCalls: { [key: number]: any } = {};
 
         for await (const chunk of stream) {
           const delta = chunk.choices[0]?.delta;
@@ -71,16 +82,37 @@ export class OpenAIClient {
           }
           
           if (delta?.tool_calls) {
-            toolCalls.push(...delta.tool_calls);
+            for (const toolCall of delta.tool_calls) {
+              const index = toolCall.index;
+              if (!accumulatedToolCalls[index]) {
+                accumulatedToolCalls[index] = {
+                  id: toolCall.id,
+                  type: toolCall.type,
+                  function: { name: '', arguments: '' }
+                };
+              }
+              
+              if (toolCall.function?.name) {
+                accumulatedToolCalls[index].function.name += toolCall.function.name;
+              }
+              
+              if (toolCall.function?.arguments) {
+                accumulatedToolCalls[index].function.arguments += toolCall.function.arguments;
+              }
+            }
           }
         }
 
-        streamingCallbacks.onComplete?.();
+        // Convert accumulated tool calls to array
+        toolCalls = Object.values(accumulatedToolCalls);
 
-        // Handle tool calls if any
+        // Handle tool calls if any - DON'T call onComplete yet if we have tool calls
         if (toolCalls.length > 0) {
           return await this.handleToolCalls(toolCalls, allMessages, streamingCallbacks);
         }
+
+        // Only call onComplete if we don't have tool calls
+        streamingCallbacks.onComplete?.();
 
         return {
           content: fullContent || 'No response content'
@@ -125,16 +157,90 @@ export class OpenAIClient {
       if (toolCall.function.name === 'web_search') {
         try {
           const params = JSON.parse(toolCall.function.arguments);
-          const result = await this.tools.execute(params);
+          
+          // Notify that we're making a tool call
+          streamingCallbacks?.onToolCall?.('web_search', params);
+          
+          const result = await this.webSearchTool.execute(params);
           toolCallResults.push({
             name: 'web_search',
             args: params,
             result: result
           });
         } catch (error) {
+          let args = {};
+          try {
+            args = JSON.parse(toolCall.function.arguments);
+          } catch (jsonError) {
+            console.error('Failed to parse tool arguments:', toolCall.function.arguments);
+          }
+          
+          // Notify about the tool call even if it fails
+          streamingCallbacks?.onToolCall?.('web_search', args);
+          
           toolCallResults.push({
             name: 'web_search',
-            args: JSON.parse(toolCall.function.arguments),
+            args: args,
+            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+          });
+        }
+      } else if (toolCall.function.name === 'scrape_url') {
+        try {
+          const params = JSON.parse(toolCall.function.arguments);
+          
+          // Notify that we're making a tool call
+          streamingCallbacks?.onToolCall?.('scrape_url', params);
+          
+          const result = await this.urlScraperTool.execute(params);
+          toolCallResults.push({
+            name: 'scrape_url',
+            args: params,
+            result: result
+          });
+        } catch (error) {
+          let args = {};
+          try {
+            args = JSON.parse(toolCall.function.arguments);
+          } catch (jsonError) {
+            console.error('Failed to parse tool arguments:', toolCall.function.arguments);
+          }
+          
+          // Notify about the tool call even if it fails
+          streamingCallbacks?.onToolCall?.('scrape_url', args);
+          
+          toolCallResults.push({
+            name: 'scrape_url',
+            args: args,
+            result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+          });
+        }
+      } else if (toolCall.function.name === 'write_file') {
+        try {
+          const params = JSON.parse(toolCall.function.arguments);
+          
+          // Notify that we're making a tool call
+          streamingCallbacks?.onToolCall?.('write_file', params);
+          
+          const result = await this.fileWriterTool.execute(params);
+          toolCallResults.push({
+            name: 'write_file',
+            args: params,
+            result: result
+          });
+        } catch (error) {
+          let args = {};
+          try {
+            args = JSON.parse(toolCall.function.arguments);
+          } catch (jsonError) {
+            console.error('Failed to parse tool arguments:', toolCall.function.arguments);
+          }
+          
+          // Notify about the tool call even if it fails
+          streamingCallbacks?.onToolCall?.('write_file', args);
+          
+          toolCallResults.push({
+            name: 'write_file',
+            args: args,
             result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
           });
         }
@@ -150,20 +256,55 @@ export class OpenAIClient {
     const updatedMessages = [...messages, toolMessage];
 
     // Get final response incorporating tool results
-    const finalCompletion = await this.client.chat.completions.create({
-      model: this.config.openai.model,
-      messages: updatedMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      })),
-      max_tokens: this.config.maxTokens,
-      temperature: this.config.temperature,
-    });
+    if (streamingCallbacks) {
+      // Signal that we need a new message for the follow-up response
+      streamingCallbacks.onNewMessage?.();
+      
+      // Use streaming for the follow-up response too
+      const stream = await this.client.chat.completions.create({
+        model: this.config.openai.model,
+        messages: updatedMessages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+        max_tokens: this.config.maxTokens,
+        temperature: this.config.temperature,
+        stream: true,
+      });
 
-    return {
-      content: finalCompletion.choices[0]?.message?.content || 'No response content',
-      toolCalls: toolCallResults
-    };
+      let finalContent = '';
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta;
+        if (delta?.content) {
+          finalContent += delta.content;
+          streamingCallbacks.onToken?.(delta.content);
+        }
+      }
+
+      // Now call onComplete after the follow-up response is done
+      streamingCallbacks.onComplete?.();
+
+      return {
+        content: finalContent || 'No response content',
+        toolCalls: toolCallResults
+      };
+    } else {
+      // Non-streaming follow-up
+      const finalCompletion = await this.client.chat.completions.create({
+        model: this.config.openai.model,
+        messages: updatedMessages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+        max_tokens: this.config.maxTokens,
+        temperature: this.config.temperature,
+      });
+
+      return {
+        content: finalCompletion.choices[0]?.message?.content || 'No response content',
+        toolCalls: toolCallResults
+      };
+    }
   }
 
   async chatWithTools(messages: Message[]): Promise<ChatResponse> {
@@ -171,29 +312,8 @@ export class OpenAIClient {
   }
 
   private getToolDefinitions() {
-    return [
-      {
-        type: 'function' as const,
-        function: {
-          name: 'web_search',
-          description: 'Search the web for current information',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: {
-                type: 'string',
-                description: 'The search query',
-              },
-              num_results: {
-                type: 'number',
-                description: 'Number of results to return (1-20)',
-                default: 10,
-              },
-            },
-            required: ['query'],
-          },
-        },
-      },
-    ];
+    return Object.values(TOOL_DEFINITIONS).map(tool => 
+      zodSchemaToOpenAIFunction(tool.name, tool.description, tool.schema)
+    );
   }
 }

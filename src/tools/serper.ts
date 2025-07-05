@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ToolParametersSchema, type ToolParameters } from '../schemas/tools.js';
+import { WebSearchParamsSchema, type WebSearchParams } from '../schemas/tools.js';
 
 export interface SearchResult {
   title: string;
@@ -29,8 +29,8 @@ export class WebSearchTool {
     this.apiKey = apiKey;
   }
 
-  async execute(params: any): Promise<string> {
-    const validatedParams = ToolParametersSchema.parse(params);
+  async execute(params: WebSearchParams): Promise<string> {
+    const validatedParams = WebSearchParamsSchema.parse(params);
     
     try {
       const response = await axios.post<SerperResponse>(

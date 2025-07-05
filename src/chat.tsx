@@ -102,19 +102,44 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig }) => {
             }
             return newMessages;
           });
+        },
+        onToolCall: (toolName: string, args: any) => {
+          // Complete the current assistant message first
+          setMessages(prev => {
+            const newMessages = [...prev];
+            if (newMessages.length > 0) {
+              const lastMessage = newMessages[newMessages.length - 1];
+              if (lastMessage.role === 'assistant') {
+                newMessages[newMessages.length - 1] = {
+                  ...lastMessage,
+                  isStreaming: false,
+                  isComplete: true
+                };
+              }
+            }
+            return newMessages;
+          });
+          
+          // Add tool call indicator immediately when tool is executed
+          if (toolName === 'web_search') {
+            addMessage('tool', `🔍 Searching: "${args.query}"`, toolName, args);
+          } else if (toolName === 'scrape_url') {
+            addMessage('tool', `🔧 Scraping: "${args.url}"`, toolName, args);
+          } else if (toolName === 'write_file') {
+            addMessage('tool', `💾 Writing: "${args.filename}"`, toolName, args);
+          } else {
+            addMessage('tool', `🔧 ${toolName}: ${JSON.stringify(args)}`, toolName, args);
+          }
+        },
+        onNewMessage: () => {
+          // Create a new streaming assistant message for the follow-up response
+          addMessage('assistant', '', undefined, undefined, true);
         }
       };
 
       const response = mode === 'CHAT' 
         ? await ChatMode.execute(openaiClient, messages, userMessage, streamingCallbacks)
         : await AgentMode.execute(openaiClient, messages, userMessage, streamingCallbacks);
-      
-      // Add tool call indicators if any
-      if (response.toolCalls && response.toolCalls.length > 0) {
-        for (const toolCall of response.toolCalls) {
-          addMessage('tool', `🔍 Searching: "${toolCall.args.query}"`, toolCall.name, toolCall.args);
-        }
-      }
     } catch (error) {
       addMessage('assistant', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
