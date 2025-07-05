@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `npm run dev` - Run development server with tsx (TypeScript execution)
 - `npm run dev chat` - Launch interactive chat interface
+- `npm run dev mcp` - Start MCP server in development mode
 - `npm run build` - Compile TypeScript to `/dist` directory
 - `npm run start` - Run compiled JavaScript from dist
 - `npm run type-check` - Validate TypeScript without emitting files
@@ -83,12 +84,37 @@ Tools use OpenAI's function calling:
 - **Tool call indicators**: Real-time UI feedback with 🔍 (search), 🔧 (scraper), and 💾 (file writer) icons
 - **Streaming tool calls**: Properly accumulate fragmented tool call data before execution
 
-**Schema-Driven Tool Definitions**:
+**New Tool Infrastructure** (`/src/utils/toolInfra.ts`):
 
-- Tool schemas defined in `/src/schemas/tools.ts` using Zod with `.describe()` for parameter descriptions
-- OpenAI function definitions auto-generated via `/src/utils/zodToOpenAI.ts`
-- Eliminates duplication between validation schemas and OpenAI function definitions
+- **Function-based tool creation**: Tools are created using `createTool()` helper function
+- **Embedded schemas**: Each tool defines its own Zod schema inline, eliminating centralized schema files
+- **Built-in validation**: `createTool()` automatically validates parameters using the tool's schema
+- **Type safety**: Tools are strongly typed with generics: `Tool<Name, Schema>`
+- **Config injection**: Tools receive both validated parameters and full config object
+- **Consistent interface**: All tools implement the same `execute(params, config)` signature
+
+**Tool Registration**:
+
+- Tools are registered in `chat.tsx` by passing them to `OpenAIClient` constructor
+- OpenAI client maintains a `Map<string, Tool>` for dynamic tool lookup
+- Tool definitions automatically generate OpenAI function schemas via `/src/utils/zodToOpenAI.ts`
 - Supports all Zod types: objects, strings, numbers, booleans, arrays, enums, optional fields, and defaults
+
+**Creating New Tools**:
+
+```typescript
+export const MyTool = createTool({
+  name: 'my_tool',
+  description: 'What this tool does',
+  schema: z.object({
+    param: z.string().describe('Parameter description'),
+  }),
+  execute: async ({ param }, config) => {
+    // Tool implementation
+    return 'Result string';
+  },
+});
+```
 
 ### Development Environment
 
@@ -103,6 +129,11 @@ Interactive command registry with:
 - **Real-time fuzzy search** as user types
 - **Keyboard navigation** (up/down arrows, enter to select)
 - **Extensible**: Add commands to `/src/commands/` and register in registry
+
+**Available Slash Commands**:
+
+- `/config` - Interactive configuration editor for API keys and settings
+- `/tools` - Display available tools and their descriptions
 
 ### Key Implementation Notes
 
@@ -130,6 +161,59 @@ Interactive command registry with:
 3. Tool indicator message
 4. New assistant message for follow-up (streaming)
 5. Final completion
+
+### MCP (Model Context Protocol) Integration
+
+**MCP Server Mode** (`/src/mcpServer.ts`):
+
+- **Stdio Server**: Exposes tools as MCP server via stdin/stdout
+- **Automatic Tool Registration**: All tools are automatically registered from existing tool definitions
+- **Zod to JSON Schema**: Converts Zod schemas to JSON Schema for MCP compatibility
+- **Command**: `jecko mcp` - Start MCP server on stdio transport
+
+**MCP Architecture**:
+
+- **Tool Mapping**: Uses `toolToMCPDefinition()` to convert internal tools to MCP format
+- **Schema Conversion**: `zodToJsonSchema()` converts Zod schemas to JSON Schema
+- **Error Handling**: Proper error responses in MCP format
+- **No OpenAI Dependency**: MCP mode only exposes tools, no AI client needed
+
+**Available MCP Tools**:
+
+- `web_search` - Web search via Serper API
+- `scrape_url` - URL content scraping
+- `file_writer` - Local file writing
+
+**MCP Client Integration** (`/src/mcpClient.ts`):
+
+- **Claude Code Compatible**: Uses same config format as Claude Code (`mcpServers` in config)
+- **Automatic Discovery**: MCP tools are automatically loaded and available alongside built-in tools
+- **Tool Wrapping**: MCP tools are wrapped to match internal tool interface
+- **Connection Management**: Handles multiple MCP server connections with proper cleanup
+- **Schema Conversion**: Converts JSON Schema to Zod for type safety
+
+**MCP Configuration Format**:
+
+```json
+{
+  "mcpServers": {
+    "server-name": {
+      "command": "npx",
+      "args": ["-y", "package-name"],
+      "env": {
+        "API_KEY": "value"
+      }
+    }
+  }
+}
+```
+
+**MCP Integration Points**:
+
+- **Server Mode**: Compatible with Claude Desktop and other MCP clients  
+- **Client Mode**: Can connect to any MCP server using Claude Code config format
+- Uses `@modelcontextprotocol/sdk` for full MCP specification compliance
+- Supports stdio transport for process-based communication
 
 ### Binary Distribution
 

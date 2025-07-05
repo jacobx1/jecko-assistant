@@ -55,6 +55,7 @@ const ConfigForm: React.FC<ConfigFormProps> = ({
       },
       maxTokens: parseInt(formData.maxTokens) || config.maxTokens,
       temperature: parseFloat(formData.temperature) || config.temperature,
+      mcpServers: config.mcpServers || {},
     };
 
     try {

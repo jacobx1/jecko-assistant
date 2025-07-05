@@ -60,6 +60,20 @@ export function createSampleConfig(): string {
       },
       maxTokens: 4000,
       temperature: 0.7,
+      mcpServers: {
+        // Example MCP server configurations (uncomment to use)
+        // "sequential-thinking": {
+        //   "command": "npx",
+        //   "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+        // },
+        // "github": {
+        //   "command": "npx",
+        //   "args": ["-y", "@modelcontextprotocol/server-github"],
+        //   "env": {
+        //     "GITHUB_PERSONAL_ACCESS_TOKEN": "your-github-token"
+        //   }
+        // }
+      },
     },
     null,
     2

@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { Config } from './schemas/config.js';
 import { zodSchemaToOpenAIFunction } from './utils/zodToOpenAI.js';
 import { Tool } from './utils/toolInfra.js';
+import { MCPClientManager } from './mcpClient.js';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -28,6 +29,7 @@ export class OpenAIClient {
   private client: OpenAI;
   private config: Config;
   private tools: Map<string, Tool<any, any>>;
+  private mcpManager: MCPClientManager;
 
   constructor(config: Config, tools: Tool<any, any>[]) {
     this.config = config;
@@ -41,6 +43,58 @@ export class OpenAIClient {
     for (const tool of tools) {
       this.tools.set(tool.name, tool);
     }
+
+    // Initialize MCP client manager
+    this.mcpManager = new MCPClientManager();
+    // Note: MCP initialization is async and happens in background
+    this.initializeMCPClients().catch(error => {
+      console.error('Failed to initialize MCP clients:', error);
+    });
+  }
+
+  // Static factory method for when you need to wait for MCP initialization
+  static async create(config: Config, tools: Tool<any, any>[]): Promise<OpenAIClient> {
+    const client = new OpenAIClient(config, tools);
+    await client.initializeMCPClients();
+    return client;
+  }
+
+  private async initializeMCPClients() {
+    try {
+      await this.mcpManager.initialize(this.config);
+      
+      // Add MCP tools to our tools map (without prefix since OpenAI calls them by original name)
+      const mcpTools = this.mcpManager.createToolWrappers();
+      for (const tool of mcpTools) {
+        // Check for name conflicts and warn if any
+        if (this.tools.has(tool.name)) {
+          console.warn(`Tool name conflict: ${tool.name} exists in both built-in and MCP tools. MCP tool will override.`);
+        }
+        this.tools.set(tool.name, tool);
+      }
+    } catch (error) {
+      console.error('Failed to initialize MCP clients:', error);
+    }
+  }
+
+  async disconnect() {
+    await this.mcpManager.disconnect();
+  }
+
+  // Method to get all available tools for display purposes
+  getAllTools(): { name: string; description: string; source: 'built-in' | 'mcp' }[] {
+    const builtInToolNames = ['web_search', 'scrape_url', 'file_writer'];
+    const allTools: { name: string; description: string; source: 'built-in' | 'mcp' }[] = [];
+    
+    for (const [name, tool] of this.tools) {
+      allTools.push({
+        name,
+        description: tool.description,
+        source: builtInToolNames.includes(name) ? 'built-in' : 'mcp',
+      });
+    }
+    
+    return allTools;
   }
 
   async chat(

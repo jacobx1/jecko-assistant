@@ -41,6 +41,13 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig }) => {
   const [activeCommand, setActiveCommand] = useState<JSX.Element | null>(null);
   const { isRawModeSupported } = useStdin();
 
+  // Cleanup MCP connections on unmount
+  useEffect(() => {
+    return () => {
+      openaiClient.disconnect().catch(console.error);
+    };
+  }, [openaiClient]);
+
   const addMessage = useCallback(
     (
       role: 'user' | 'assistant' | 'tool',

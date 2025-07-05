@@ -5,6 +5,7 @@ import { render } from 'ink';
 import React from 'react';
 import { loadConfig, createSampleConfig, getConfigPath } from './config.js';
 import { ChatApp } from './chat.js';
+import { startMCPServer } from './mcpServer.js';
 import chalk from 'chalk';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
@@ -82,6 +83,21 @@ program
       getConfigPath().forEach((path, index) => {
         console.log(`${index + 1}. ${path}`);
       });
+    }
+  });
+
+program
+  .command('mcp')
+  .description('Start MCP server on stdio')
+  .action(async () => {
+    try {
+      await startMCPServer();
+    } catch (error) {
+      console.error(
+        chalk.red('Error starting MCP server:'),
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+      process.exit(1);
     }
   });
 
