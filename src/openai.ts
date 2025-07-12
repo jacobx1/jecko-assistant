@@ -16,6 +16,11 @@ export interface ChatResponse {
     args: any;
     result: string;
   }>;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
 }
 
 export interface StreamingCallbacks {
@@ -23,6 +28,7 @@ export interface StreamingCallbacks {
   onComplete?: () => void;
   onToolCall?: (toolName: string, args: any) => void;
   onNewMessage?: () => void; // Called when starting a new assistant message
+  onUsage?: (usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => void;
 }
 
 export class OpenAIClient {
@@ -100,12 +106,14 @@ export class OpenAIClient {
   async chat(
     messages: Message[],
     useTools: boolean = false,
-    streamingCallbacks?: StreamingCallbacks
+    streamingCallbacks?: StreamingCallbacks,
+    isAgentMode: boolean = false
   ): Promise<ChatResponse> {
     const systemMessage: Message = {
       role: 'system',
-      content:
-        'You are Jecko, a helpful AI assistant. Use tools when needed to provide accurate and up-to-date information.',
+      content: isAgentMode
+        ? 'You are Jecko, a helpful AI assistant operating in agent mode. Your goal is to complete the given task thoroughly by chaining multiple tools and analysis steps. Always continue using tools and gathering information until you have fully addressed the user\'s request. Don\'t stop after the first tool call - keep investigating, analyzing, and taking actions until the task is comprehensively complete. Use tools aggressively to gather all necessary information and complete all aspects of the task.'
+        : 'You are Jecko, a helpful AI assistant. Use tools when needed to provide accurate and up-to-date information.',
     };
 
     const allMessages = [systemMessage, ...messages];
@@ -124,11 +132,13 @@ export class OpenAIClient {
           tools: useTools ? this.getToolDefinitions() : undefined,
           tool_choice: useTools ? 'auto' : undefined,
           stream: true,
+          stream_options: { include_usage: true }, // Request usage info in streaming
         });
 
         let fullContent = '';
         let toolCalls: any[] = [];
         let accumulatedToolCalls: { [key: number]: any } = {};
+        let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
 
         for await (const chunk of stream) {
           const delta = chunk.choices[0]?.delta;
@@ -160,6 +170,16 @@ export class OpenAIClient {
               }
             }
           }
+
+          // Capture usage information from the final chunk
+          if (chunk.usage) {
+            usage = {
+              promptTokens: chunk.usage.prompt_tokens,
+              completionTokens: chunk.usage.completion_tokens,
+              totalTokens: chunk.usage.total_tokens,
+            };
+            streamingCallbacks.onUsage?.(usage);
+          }
         }
 
         // Convert accumulated tool calls to array
@@ -170,15 +190,23 @@ export class OpenAIClient {
           return await this.handleToolCalls(
             toolCalls,
             allMessages,
-            streamingCallbacks
+            streamingCallbacks,
+            usage
           );
         }
 
         // Only call onComplete if we don't have tool calls
         streamingCallbacks.onComplete?.();
 
+        // If no usage was provided by the stream, estimate it
+        if (!usage) {
+          usage = this.estimateTokenUsage(allMessages, fullContent);
+          streamingCallbacks.onUsage?.(usage);
+        }
+
         return {
           content: fullContent || 'No response content',
+          usage,
         };
       } else {
         // Non-streaming mode (existing code)
@@ -199,13 +227,20 @@ export class OpenAIClient {
           throw new Error('No response from OpenAI');
         }
 
+        const usage = completion.usage ? {
+          promptTokens: completion.usage.prompt_tokens,
+          completionTokens: completion.usage.completion_tokens,
+          totalTokens: completion.usage.total_tokens,
+        } : undefined;
+
         // Handle tool calls
         if (message.tool_calls && message.tool_calls.length > 0) {
-          return await this.handleToolCalls(message.tool_calls, allMessages);
+          return await this.handleToolCalls(message.tool_calls, allMessages, undefined, usage);
         }
 
         return {
           content: message.content || 'No response content',
+          usage,
         };
       }
     } catch (error) {
@@ -218,7 +253,8 @@ export class OpenAIClient {
   private async handleToolCalls(
     toolCalls: any[],
     messages: Message[],
-    streamingCallbacks?: StreamingCallbacks
+    streamingCallbacks?: StreamingCallbacks,
+    initialUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
   ): Promise<ChatResponse> {
     const toolCallResults = [];
 
@@ -290,15 +326,42 @@ export class OpenAIClient {
         max_tokens: this.config.maxTokens,
         temperature: this.config.temperature,
         stream: true,
+        stream_options: { include_usage: true }, // Request usage info in streaming
       });
 
       let finalContent = '';
+      let followUpUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
+      
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta;
         if (delta?.content) {
           finalContent += delta.content;
           streamingCallbacks.onToken?.(delta.content);
         }
+        
+        if (chunk.usage) {
+          followUpUsage = {
+            promptTokens: chunk.usage.prompt_tokens,
+            completionTokens: chunk.usage.completion_tokens,
+            totalTokens: chunk.usage.total_tokens,
+          };
+        }
+      }
+
+      // Combine usage from initial call and follow-up
+      let combinedUsage = initialUsage && followUpUsage ? {
+        promptTokens: initialUsage.promptTokens + followUpUsage.promptTokens,
+        completionTokens: initialUsage.completionTokens + followUpUsage.completionTokens,
+        totalTokens: initialUsage.totalTokens + followUpUsage.totalTokens,
+      } : (followUpUsage || initialUsage);
+
+      // If no usage was captured, estimate it
+      if (!combinedUsage) {
+        combinedUsage = this.estimateTokenUsage(updatedMessages, finalContent);
+      }
+
+      if (combinedUsage) {
+        streamingCallbacks.onUsage?.(combinedUsage);
       }
 
       // Now call onComplete after the follow-up response is done
@@ -307,6 +370,7 @@ export class OpenAIClient {
       return {
         content: finalContent || 'No response content',
         toolCalls: toolCallResults,
+        usage: combinedUsage,
       };
     } else {
       // Non-streaming follow-up
@@ -320,10 +384,23 @@ export class OpenAIClient {
         temperature: this.config.temperature,
       });
 
+      const followUpUsage = finalCompletion.usage ? {
+        promptTokens: finalCompletion.usage.prompt_tokens,
+        completionTokens: finalCompletion.usage.completion_tokens,
+        totalTokens: finalCompletion.usage.total_tokens,
+      } : undefined;
+
+      const combinedUsage = initialUsage && followUpUsage ? {
+        promptTokens: initialUsage.promptTokens + followUpUsage.promptTokens,
+        completionTokens: initialUsage.completionTokens + followUpUsage.completionTokens,
+        totalTokens: initialUsage.totalTokens + followUpUsage.totalTokens,
+      } : (followUpUsage || initialUsage);
+
       return {
         content:
           finalCompletion.choices[0]?.message?.content || 'No response content',
         toolCalls: toolCallResults,
+        usage: combinedUsage,
       };
     }
   }
@@ -336,5 +413,28 @@ export class OpenAIClient {
     return Array.from(this.tools.values()).map((tool) =>
       zodSchemaToOpenAIFunction(tool.name, tool.description, tool.schema)
     );
+  }
+
+  /**
+   * Estimates token usage when not provided by the API
+   * Rough estimation: ~4 characters per token
+   */
+  private estimateTokenUsage(
+    messages: Message[],
+    responseContent: string
+  ): { promptTokens: number; completionTokens: number; totalTokens: number } {
+    const promptText = messages.map(msg => msg.content).join(' ');
+    const promptChars = promptText.length;
+    const responseChars = responseContent.length;
+    
+    const promptTokens = Math.ceil(promptChars / 4);
+    const completionTokens = Math.ceil(responseChars / 4);
+    const totalTokens = promptTokens + completionTokens;
+    
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens,
+    };
   }
 }

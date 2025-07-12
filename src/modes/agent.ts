@@ -38,7 +38,8 @@ export class AgentMode {
       const result = await client.chat(
         currentMessages,
         true,
-        streamingCallbacks
+        streamingCallbacks,
+        true // isAgentMode = true
       );
       responses.push(result.content);
 

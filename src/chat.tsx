@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, JSX } from 'react';
-import { Box, Text, useInput, useStdin } from 'ink';
+import React, { useState, useEffect, useCallback, JSX, useMemo } from 'react';
+import { Box, Text, useInput, useStdin, Static } from 'ink';
 import { Config } from './schemas/config.js';
 import { OpenAIClient } from './openai.js';
 import { ChatMode, AgentMode } from './modes/index.js';
@@ -9,6 +9,8 @@ import { getCommand, searchCommands } from './commands/registry.js';
 import { WebSearchTool } from './tools/serper.js';
 import { URLScraperTool } from './tools/scraper.js';
 import { FilerWriterTool } from './tools/fileWriter.js';
+import { ConversationCompactor } from './utils/compaction.js';
+import { CompactDisplay } from './commands/compact.js';
 
 export type Mode = 'CHAT' | 'AGENT';
 
@@ -21,6 +23,39 @@ interface Message {
   isStreaming?: boolean;
   isComplete?: boolean;
 }
+
+// Memoized message component to prevent unnecessary re-renders
+const MessageItem = React.memo<{ message: Message; index: number }>(({ message }) => (
+  <Box marginBottom={1}>
+    <Text
+      bold
+      color={
+        message.role === 'user'
+          ? 'green'
+          : message.role === 'tool'
+            ? 'yellow'
+            : 'blue'
+      }
+    >
+      {message.role === 'user'
+        ? '> '
+        : message.role === 'tool'
+          ? '🔧 '
+          : 'Assistant: '}
+    </Text>
+    <Box>
+      {message.role === 'assistant' && message.isStreaming ? (
+        <StreamingText text={message.content} />
+      ) : message.role === 'assistant' ? (
+        <StreamingText text={message.content} />
+      ) : (
+        <Text color={message.role === 'tool' ? 'yellow' : 'white'}>
+          {message.content}
+        </Text>
+      )}
+    </Box>
+  </Box>
+));
 
 interface ChatAppProps {
   config: Config;
@@ -40,7 +75,63 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
   const [commandQuery, setCommandQuery] = useState('/');
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [activeCommand, setActiveCommand] = useState<JSX.Element | null>(null);
+  const [currentUsage, setCurrentUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(null);
+  const [compactor] = useState(() => new ConversationCompactor(openaiClient));
   const { isRawModeSupported } = useStdin();
+
+  // Get model context window size
+  const getContextWindowSize = (model: string): number => {
+    const contextWindows: Record<string, number> = {
+      'gpt-4o': 128000,
+      'gpt-4o-mini': 128000,
+      'gpt-4-turbo': 128000,
+      'gpt-4': 8192,
+      'gpt-3.5-turbo': 16385,
+      'o1-preview': 128000,
+      'o1-mini': 128000,
+      'gpt-4.1': 1000000,         // 1M tokens
+      'gpt-4.1-mini': 1000000,   // 1M tokens
+      'gpt-4.1-nano': 1000000,   // 1M tokens
+    };
+    return contextWindows[model] || 8192; // Default fallback
+  };
+
+  // Calculate context usage percentage - memoized to prevent re-calculations
+  const contextUsageInfo = useMemo(() => {
+    if (!currentUsage) return null;
+    const contextWindow = getContextWindowSize(config.openai.model);
+    const usedPercentage = Math.round((currentUsage.totalTokens / contextWindow) * 100);
+    const remainingPercentage = Math.max(0, 100 - usedPercentage);
+    return {
+      used: currentUsage.totalTokens,
+      total: contextWindow,
+      usedPercentage,
+      remainingPercentage,
+    };
+  }, [currentUsage, config.openai.model]);
+
+  // Manual compaction function
+  const performCompaction = async (): Promise<void> => {
+    if (messages.length === 0) return;
+    
+    setIsLoading(true);
+    try {
+      const result = await compactor.compact(messages);
+      setMessages(result.compactedMessages);
+      
+      // Show compaction result
+      setActiveCommand(<CompactDisplay result={result} />);
+      
+      // Clear usage to force recalculation on next response
+      setCurrentUsage(null);
+    } catch (error) {
+      console.error('Compaction failed:', error);
+      addMessage('assistant', '❌ Compaction failed. Please try again.', undefined, undefined, false, true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
 
   // Register client cleanup function with parent
   useEffect(() => {
@@ -60,7 +151,8 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
       content: string,
       toolName?: string,
       toolArgs?: any,
-      isStreaming?: boolean
+      isStreaming?: boolean,
+      isComplete?: boolean
     ) => {
       setMessages((prev) => [
         ...prev,
@@ -71,12 +163,21 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
           toolName,
           toolArgs,
           isStreaming,
-          isComplete: !isStreaming,
+          isComplete: isComplete !== undefined ? isComplete : !isStreaming,
         },
       ]);
     },
     []
   );
+
+  // Update the auto-compaction function now that addMessage is defined
+  const checkAutoCompactionActual = useCallback(async (): Promise<void> => {
+    if (contextUsageInfo && contextUsageInfo.remainingPercentage <= 10 && messages.length > 6) {
+      addMessage('assistant', '⚠️ Context space is running low (10% remaining). Auto-compacting conversation...', undefined, undefined, false, true);
+      await performCompaction();
+      addMessage('assistant', '✅ Auto-compaction completed. Conversation history has been summarized.', undefined, undefined, false, true);
+    }
+  }, [contextUsageInfo, messages.length, addMessage, performCompaction]);
 
   const updateLastMessage = useCallback(
     (content: string, isComplete: boolean = false) => {
@@ -186,6 +287,11 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
           // Create a new streaming assistant message for the follow-up response
           addMessage('assistant', '', undefined, undefined, true);
         },
+        onUsage: (usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
+          setCurrentUsage(usage);
+          // Check for auto-compaction after setting usage
+          setTimeout(() => checkAutoCompactionActual(), 100);
+        },
       };
 
       const response =
@@ -219,6 +325,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
     addMessage,
     updateLastMessage,
     showCommandSelector,
+    checkAutoCompactionActual,
   ]);
 
   const toggleMode = useCallback(() => {
@@ -233,6 +340,12 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
         setInput('');
         setCommandQuery('/');
 
+        // Handle compact command specially
+        if (commandName === 'compact') {
+          await performCompaction();
+          return;
+        }
+
         const result = await command.execute(config, (newConfig) => {
           setConfig(newConfig);
           setOpenaiClient(new OpenAIClient(newConfig, [WebSearchTool, URLScraperTool, FilerWriterTool]));
@@ -244,7 +357,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
         }
       }
     },
-    [config]
+    [config, performCompaction]
   );
 
   const handleCommandCancel = useCallback(() => {
@@ -339,18 +452,23 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
     return activeCommand;
   }
 
+  const showInformationalHeader = messages.length === 0 && !showCommandSelector;
+
   return (
     <Box flexDirection="column" height="100%">
       {/* Header */}
+     {showInformationalHeader && (
       <Box borderStyle="single" paddingX={1} marginBottom={1}>
         <Text bold color="cyan">
           Jecko Assistant
         </Text>
       </Box>
+     )}
 
       {/* Messages */}
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
-        {messages.length === 0 && !showCommandSelector && (
+        {/* Show welcome message only when there are no messages and not in command mode */}
+        {showInformationalHeader && (
           <Box flexDirection="column">
             <Text color="gray">
               Welcome! Type a message and press Enter to start.
@@ -358,37 +476,23 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
             <Text color="gray">Type / to see available commands.</Text>
           </Box>
         )}
-        {messages.map((msg, idx) => (
-          <Box key={idx} marginBottom={1}>
-            <Text
-              bold
-              color={
-                msg.role === 'user'
-                  ? 'green'
-                  : msg.role === 'tool'
-                    ? 'yellow'
-                    : 'blue'
-              }
-            >
-              {msg.role === 'user'
-                ? '> '
-                : msg.role === 'tool'
-                  ? '🔧 '
-                  : 'Assistant: '}
-            </Text>
-            <Box>
-              {msg.role === 'assistant' && msg.isStreaming ? (
-                <StreamingText text={msg.content} />
-              ) : msg.role === 'assistant' ? (
-                <StreamingText text={msg.content} />
-              ) : (
-                <Text color={msg.role === 'tool' ? 'yellow' : 'white'}>
-                  {msg.content}
-                </Text>
-              )}
-            </Box>
-          </Box>
-        ))}
+        
+        {/* Use Static for completed messages to prevent re-renders - only when we have messages */}
+        {messages.length > 0 && (
+          <Static items={messages.filter(msg => msg.isComplete !== false)}>
+            {(msg, idx) => (
+              <MessageItem key={`${msg.timestamp.getTime()}-${idx}`} message={msg} index={idx} />
+            )}
+          </Static>
+        )}
+        
+        {/* Render streaming/incomplete messages separately */}
+        {messages
+          .filter(msg => msg.isComplete === false || msg.isStreaming)
+          .map((msg, idx) => (
+            <MessageItem key={`streaming-${msg.timestamp.getTime()}-${idx}`} message={msg} index={idx} />
+          ))}
+        
         {isLoading && (
           <Box>
             <Text color="yellow">Assistant is thinking...</Text>
@@ -415,11 +519,20 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
       {/* Status bar */}
       <Box justifyContent="space-between" paddingX={1}>
         <Text color="cyan">Mode: {mode}</Text>
-        <Text color="gray">
-          {showCommandSelector
-            ? 'Command Mode'
-            : 'Shift+Tab to switch • / for commands'}
-        </Text>
+        <Box>
+          {contextUsageInfo ? (
+            <Text color={contextUsageInfo.usedPercentage > 80 ? 'red' : 
+                         contextUsageInfo.usedPercentage > 60 ? 'yellow' : 'green'}>
+              {contextUsageInfo.remainingPercentage}% context remaining
+            </Text>
+          ) : (
+            <Text color="gray">
+              {showCommandSelector
+                ? 'Command Mode'
+                : 'Shift+Tab to switch • / for commands'}
+            </Text>
+          )}
+        </Box>
       </Box>
     </Box>
   );

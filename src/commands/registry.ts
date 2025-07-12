@@ -1,8 +1,9 @@
 import { type SlashCommand, type CommandMatch } from './types.js';
 import { configCommand } from './config.js';
 import { toolsCommand } from './tools.js';
+import { compactCommand } from './compact.js';
 
-const commands: SlashCommand[] = [configCommand, toolsCommand];
+const commands: SlashCommand[] = [configCommand, toolsCommand, compactCommand];
 
 export function getAllCommands(): SlashCommand[] {
   return [...commands];
