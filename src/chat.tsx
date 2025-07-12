@@ -133,14 +133,29 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
   };
 
 
-  // Register client cleanup function with parent
+  // Register client cleanup function with parent and handle signals
   useEffect(() => {
     if (onClientCreate) {
       onClientCreate(() => openaiClient.disconnect());
     }
     
+    // Handle Ctrl+C within the component
+    const handleExit = async () => {
+      try {
+        await openaiClient.disconnect();
+      } catch (error) {
+        console.error('Error during cleanup:', error);
+      } finally {
+        process.exit(0);
+      }
+    };
+
+    // Add Ctrl+C handler
+    process.on('SIGINT', handleExit);
+    
     // Cleanup MCP connections on unmount
     return () => {
+      process.off('SIGINT', handleExit);
       openaiClient.disconnect().catch(console.error);
     };
   }, [openaiClient, onClientCreate]);
@@ -346,6 +361,27 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
           return;
         }
 
+        // Handle exit command specially
+        if (commandName === 'exit') {
+          setActiveCommand(
+            <Box flexDirection="column" paddingX={2} paddingY={1}>
+              <Box marginBottom={1}>
+                <Text bold color="cyan">
+                  👋 Goodbye!
+                </Text>
+              </Box>
+              <Text color="gray">
+                Thanks for using Jecko Assistant. Exiting...
+              </Text>
+            </Box>
+          );
+          setTimeout(async () => {
+            await openaiClient.disconnect();
+            process.exit(0);
+          }, 1500);
+          return;
+        }
+
         const result = await command.execute(config, (newConfig) => {
           setConfig(newConfig);
           setOpenaiClient(new OpenAIClient(newConfig, [WebSearchTool, URLScraperTool, FilerWriterTool]));
@@ -372,6 +408,15 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
   }, []);
 
   useInput((input: string, key: any) => {
+    // Enhanced Ctrl+C handling
+    if (key.ctrl && input === 'c') {
+      console.log('\n\nExiting...');
+      openaiClient.disconnect().catch(() => {}).finally(() => {
+        process.exit(0);
+      });
+      return;
+    }
+
     // If we're in an active command, let it handle the input
     if (activeCommand) {
       if (key.escape) {

@@ -19,18 +19,47 @@ program
 
 // Global cleanup functions
 const cleanupFunctions: (() => Promise<void>)[] = [];
+let inkInstance: any = null;
 
-// Signal handlers for graceful shutdown
-process.on('SIGINT', async () => {
+// Enhanced signal handlers for graceful shutdown
+const cleanup = async () => {
   console.log('\n\nShutting down gracefully...');
+  
+  // Cleanup Ink instance first
+  if (inkInstance) {
+    try {
+      inkInstance.unmount();
+      inkInstance.cleanup();
+    } catch (error) {
+      // Ignore cleanup errors
+    }
+  }
+  
+  // Run other cleanup functions
   await Promise.allSettled(cleanupFunctions.map(fn => fn()));
+  
+  // Force exit if needed
+  setTimeout(() => {
+    console.log('Force exiting...');
+    process.exit(1);
+  }, 3000);
+  
   process.exit(0);
+};
+
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
+process.on('SIGQUIT', cleanup);
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  cleanup();
 });
 
-process.on('SIGTERM', async () => {
-  console.log('\n\nShutting down gracefully...');
-  await Promise.allSettled(cleanupFunctions.map(fn => fn()));
-  process.exit(0);
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+  cleanup();
 });
 
 program
@@ -48,7 +77,8 @@ program
         }
       });
       
-      render(app);
+      // Store the Ink instance for cleanup
+      inkInstance = render(app);
     } catch (error) {
       console.error(
         chalk.red('Error:'),

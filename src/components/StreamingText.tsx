@@ -3,7 +3,9 @@ import { Text } from 'ink';
 import { marked } from 'marked';
 import { markedTerminal } from 'marked-terminal';
 
-marked.use(markedTerminal() as any);
+marked.use(markedTerminal({
+  reflowText: false
+}) as any);
 
 interface StreamingTextProps {
   text: string;
@@ -11,11 +13,18 @@ interface StreamingTextProps {
 }
 
 export const StreamingText: React.FC<StreamingTextProps> = ({ text }) => {
+  const parsedText = marked.parse(text, {
+    async: false,
+  });
+  
+  // Remove excessive newlines from markdown parsing
+  const cleanedText = typeof parsedText === 'string' 
+    ? parsedText.trim()
+    : parsedText;
+    
   return (
     <Text>
-      {marked.parse(text, {
-        async: false,
-      })}
+      {cleanedText}
     </Text>
   );
 };
