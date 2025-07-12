@@ -24,9 +24,10 @@ interface Message {
 
 interface ChatAppProps {
   config: Config;
+  onClientCreate?: (disconnectFn: () => Promise<void>) => void;
 }
 
-export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig }) => {
+export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClientCreate }) => {
   const [mode, setMode] = useState<Mode>('CHAT');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -41,12 +42,17 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig }) => {
   const [activeCommand, setActiveCommand] = useState<JSX.Element | null>(null);
   const { isRawModeSupported } = useStdin();
 
-  // Cleanup MCP connections on unmount
+  // Register client cleanup function with parent
   useEffect(() => {
+    if (onClientCreate) {
+      onClientCreate(() => openaiClient.disconnect());
+    }
+    
+    // Cleanup MCP connections on unmount
     return () => {
       openaiClient.disconnect().catch(console.error);
     };
-  }, [openaiClient]);
+  }, [openaiClient, onClientCreate]);
 
   const addMessage = useCallback(
     (

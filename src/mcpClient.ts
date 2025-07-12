@@ -15,6 +15,7 @@ export interface MCPClientTool {
 export class MCPClientManager {
   private clients: Map<string, Client> = new Map();
   private tools: Map<string, MCPClientTool> = new Map();
+  private transports: Map<string, StdioClientTransport> = new Map();
 
   async initialize(config: Config): Promise<void> {
     if (!config.mcpServers) {
@@ -51,8 +52,9 @@ export class MCPClientManager {
       // Connect client to transport
       await client.connect(transport);
 
-      // Store client
+      // Store client and transport
       this.clients.set(serverName, client);
+      this.transports.set(serverName, transport);
 
       // List available tools from this server
       const toolsResponse = await client.listTools();
@@ -76,11 +78,15 @@ export class MCPClientManager {
   }
 
   async disconnect(): Promise<void> {
-    // Close all client connections
+    // Close all client connections and transports
     const disconnectPromises = Array.from(this.clients.entries()).map(
       async ([serverName, client]) => {
         try {
           await client.close();
+          const transport = this.transports.get(serverName);
+          if (transport) {
+            await transport.close();
+          }
         } catch (error) {
           console.error(`Error disconnecting from ${serverName}:`, error);
         }
@@ -90,6 +96,7 @@ export class MCPClientManager {
     await Promise.allSettled(disconnectPromises);
     
     this.clients.clear();
+    this.transports.clear();
     this.tools.clear();
   }
 

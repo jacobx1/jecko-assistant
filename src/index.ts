@@ -17,13 +17,38 @@ program
   .description('AI chat assistant CLI with OpenAI, Ink, and tool support')
   .version('1.0.0');
 
+// Global cleanup functions
+const cleanupFunctions: (() => Promise<void>)[] = [];
+
+// Signal handlers for graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n\nShutting down gracefully...');
+  await Promise.allSettled(cleanupFunctions.map(fn => fn()));
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n\nShutting down gracefully...');
+  await Promise.allSettled(cleanupFunctions.map(fn => fn()));
+  process.exit(0);
+});
+
 program
   .command('chat')
   .description('Start interactive chat session')
   .action(async () => {
     try {
       const config = await loadConfig();
-      render(React.createElement(ChatApp, { config }));
+      
+      // Create the app with cleanup callback
+      const app = React.createElement(ChatApp, { 
+        config,
+        onClientCreate: (disconnectFn: () => Promise<void>) => {
+          cleanupFunctions.push(disconnectFn);
+        }
+      });
+      
+      render(app);
     } catch (error) {
       console.error(
         chalk.red('Error:'),

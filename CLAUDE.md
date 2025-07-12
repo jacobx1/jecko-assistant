@@ -191,6 +191,7 @@ Interactive command registry with:
 - **Tool Wrapping**: MCP tools are wrapped to match internal tool interface
 - **Connection Management**: Handles multiple MCP server connections with proper cleanup
 - **Schema Conversion**: Converts JSON Schema to Zod for type safety
+- **Signal Handling**: Proper SIGINT/SIGTERM handling for graceful child process cleanup
 
 **MCP Configuration Format**:
 
