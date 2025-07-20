@@ -6,6 +6,7 @@ export interface Tool<Name extends string, Schema extends z.ZodSchema> {
   schema: Schema;
   name: Name;
   description: string;
+  formatToolCall?: (params: z.infer<Schema>) => string;
 }
 
 export function createTool<Name extends string, Schema extends z.ZodSchema>(
@@ -18,6 +19,31 @@ export function createTool<Name extends string, Schema extends z.ZodSchema>(
       return tool.execute(validatedParams, config);
     },
   };
+}
+
+// Helper function to format tool call display
+export function formatToolCallDisplay(toolName: string, args: any, tool?: Tool<any, any>): string {
+  // Use custom formatter if available
+  if (tool?.formatToolCall) {
+    try {
+      return tool.formatToolCall(args);
+    } catch (error) {
+      console.warn(`Error formatting tool call for ${toolName}:`, error);
+    }
+  }
+  
+  // Default formatters for built-in tools
+  switch (toolName) {
+    case 'web_search':
+      return `🔍 Searching: "${args.query}"`;
+    case 'scrape_url':
+      return `🔧 Scraping: "${args.url}"`;
+    case 'file_writer':
+      return `💾 Writing: "${args.filename}"`;
+    default:
+      // Fallback to generic format
+      return `🔧 ${toolName}: ${JSON.stringify(args)}`;
+  }
 }
 
 // Convert Zod schema to JSON Schema for MCP

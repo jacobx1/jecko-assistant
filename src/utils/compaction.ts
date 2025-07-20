@@ -1,11 +1,15 @@
 import { OpenAIClient } from '../openai.js';
 
 interface Message {
-  role: 'user' | 'assistant' | 'tool';
+  role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   timestamp: number;
   toolName?: string;
   toolArgs?: any;
+  tool_call_id?: string;
+  tool_calls?: any[];
+  isInternal?: boolean;
+  displayContent?: string;
 }
 
 export interface CompactionResult {

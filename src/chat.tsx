@@ -9,7 +9,9 @@ import { WebSearchTool } from './tools/serper.js';
 import { URLScraperTool } from './tools/scraper.js';
 import { FilerWriterTool } from './tools/fileWriter.js';
 import { TodoistCreateTaskTool, TodoistGetTasksTool, TodoistGetProjectsTool, TodoistCompleteTaskTool, TodoistCreateProjectTool } from './tools/todoist.js';
+import { AgentPlanCreateTool, AgentPlanUpdateTool, AgentDoneTool } from './tools/internalPlan.js';
 import { ConversationCompactor } from './utils/compaction.js';
+import { formatToolCallDisplay } from './utils/toolInfra.js';
 
 // Import new composable components
 import { MessageList, type Message } from './components/MessageList.js';
@@ -67,7 +69,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
   // Local state that doesn't need Redux
   const [config, setConfig] = useState(initialConfig);
   const [openaiClient, setOpenaiClient] = useState(
-    () => new OpenAIClient(initialConfig, [WebSearchTool, URLScraperTool, FilerWriterTool, TodoistCreateTaskTool, TodoistGetTasksTool, TodoistGetProjectsTool, TodoistCompleteTaskTool, TodoistCreateProjectTool])
+    () => new OpenAIClient(initialConfig, [WebSearchTool, URLScraperTool, FilerWriterTool, TodoistCreateTaskTool, TodoistGetTasksTool, TodoistGetProjectsTool, TodoistCompleteTaskTool, TodoistCreateProjectTool, AgentPlanCreateTool, AgentPlanUpdateTool, AgentDoneTool])
   );
   const [compactor] = useState(() => new ConversationCompactor(openaiClient));
   const { isRawModeSupported } = useStdin();
@@ -175,8 +177,9 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
         onComplete: () => {
           dispatch(markLastMessageComplete());
         },
-        onToolCall: (toolName: string, args: any) => {
-          dispatch(addToolCallMessage({ toolName, args }));
+        onToolCall: (toolName: string, args: any, tool?: any) => {
+          const displayMessage = formatToolCallDisplay(toolName, args, tool);
+          dispatch(addToolCallMessage({ toolName, args, displayMessage }));
         },
         onNewMessage: () => {
           dispatch(addStreamingAssistantMessage());
@@ -202,6 +205,27 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
               userMessage,
               streamingCallbacks
             );
+
+      // Add any tool call messages from the response to Redux state
+      if (response.messagesToAdd && response.messagesToAdd.length > 0) {
+        for (const msg of response.messagesToAdd) {
+          // Skip system messages and internal messages from being added to Redux state
+          if (msg.role === 'system' || msg.isInternal) {
+            continue;
+          }
+          
+          dispatch(addMessage({
+            role: msg.role,
+            content: msg.content,
+            toolName: msg.tool_calls ? 'assistant_with_tool_calls' : msg.role === 'tool' ? 'tool_response' : undefined,
+            toolArgs: msg.tool_calls,
+            tool_call_id: msg.tool_call_id,
+            tool_calls: msg.tool_calls,
+            isInternal: msg.isInternal,
+            isComplete: true,
+          }));
+        }
+      }
     } catch (error) {
       dispatch(addMessage({
         role: 'assistant',
@@ -251,7 +275,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
 
         const result = await command.execute(config, (newConfig) => {
           setConfig(newConfig);
-          setOpenaiClient(new OpenAIClient(newConfig, [WebSearchTool, URLScraperTool, FilerWriterTool, TodoistCreateTaskTool, TodoistGetTasksTool, TodoistGetProjectsTool, TodoistCompleteTaskTool, TodoistCreateProjectTool]));
+          setOpenaiClient(new OpenAIClient(newConfig, [WebSearchTool, URLScraperTool, FilerWriterTool, TodoistCreateTaskTool, TodoistGetTasksTool, TodoistGetProjectsTool, TodoistCompleteTaskTool, TodoistCreateProjectTool, AgentPlanCreateTool, AgentPlanUpdateTool, AgentDoneTool]));
           // Close command after saving
           dispatch(setActiveCommandJSX(false));
           commandManager.clear();

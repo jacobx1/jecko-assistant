@@ -1,26 +1,15 @@
 import { z } from 'zod';
+import { OpenAI } from 'openai';
 
 interface OpenAIProperty {
-  type: string;
+  type: string | string[];
   description?: string;
   default?: any;
   enum?: string[];
   items?: OpenAIProperty;
   properties?: Record<string, OpenAIProperty>;
   required?: string[];
-}
-
-interface OpenAIFunctionDefinition {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: {
-      type: 'object';
-      properties: Record<string, OpenAIProperty>;
-      required: string[];
-    };
-  };
+  additionalProperties?: boolean;
 }
 
 /**
@@ -41,14 +30,29 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
     const required: string[] = [];
 
     for (const [key, fieldSchema] of Object.entries(shape)) {
-      properties[key] = zodSchemaToOpenAIProperty(fieldSchema as z.ZodTypeAny);
+      // In strict mode, ALL properties are required
+      required.push(key);
 
-      // Check if field is required (not optional or has default)
-      if (
-        !(fieldSchema instanceof z.ZodOptional) &&
-        !(fieldSchema instanceof z.ZodDefault)
-      ) {
-        required.push(key);
+      // Check if this is an optional or default field
+      const isOptional = fieldSchema instanceof z.ZodOptional;
+      const hasDefault = fieldSchema instanceof z.ZodDefault;
+
+      if (isOptional || hasDefault) {
+        // For optional properties, get the inner type and make it nullable
+        const innerProperty = zodSchemaToOpenAIProperty(
+          fieldSchema as z.ZodTypeAny
+        );
+        properties[key] = {
+          ...innerProperty,
+          type: Array.isArray(innerProperty.type)
+            ? [...innerProperty.type, 'null']
+            : [innerProperty.type, 'null'],
+        };
+      } else {
+        // Required property - use as-is
+        properties[key] = zodSchemaToOpenAIProperty(
+          fieldSchema as z.ZodTypeAny
+        );
       }
     }
 
@@ -56,6 +60,7 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
       type: 'object',
       properties,
       required,
+      additionalProperties: false,
     };
   }
 
@@ -153,7 +158,7 @@ export function zodSchemaToOpenAIFunction(
   name: string,
   description: string,
   schema: z.ZodObject<any>
-): OpenAIFunctionDefinition {
+): OpenAI.ChatCompletionTool {
   const parametersSchema = zodSchemaToOpenAIProperty(schema);
 
   return {
@@ -165,26 +170,24 @@ export function zodSchemaToOpenAIFunction(
         type: 'object',
         properties: parametersSchema.properties || {},
         required: parametersSchema.required || [],
+        additionalProperties: false,
       },
+      strict: true,
     },
   };
 }
 
 /**
  * Extract required fields from Zod object schema
+ * In strict mode, ALL fields are required
  */
 export function getRequiredFields(schema: z.ZodObject<any>): string[] {
   const shape = schema.shape;
   const required: string[] = [];
 
-  for (const [key, fieldSchema] of Object.entries(shape)) {
-    // Check if field is required (not optional or has default)
-    if (
-      !(fieldSchema instanceof z.ZodOptional) &&
-      !(fieldSchema instanceof z.ZodDefault)
-    ) {
-      required.push(key);
-    }
+  for (const [key] of Object.entries(shape)) {
+    // In strict mode, ALL properties are required
+    required.push(key);
   }
 
   return required;

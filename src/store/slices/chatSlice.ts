@@ -12,7 +12,7 @@ export interface ChatState {
 
 const initialState: ChatState = {
   messages: [],
-  mode: 'CHAT',
+  mode: 'AGENT',
   isLoading: false,
   input: '',
 };
@@ -22,12 +22,16 @@ export const chatSlice = createSlice({
   initialState,
   reducers: {
     addMessage: (state, action: PayloadAction<{
-      role: 'user' | 'assistant' | 'tool';
+      role: 'user' | 'assistant' | 'tool' | 'system';
       content: string;
       toolName?: string;
       toolArgs?: any;
       isStreaming?: boolean;
       isComplete?: boolean;
+      tool_call_id?: string;
+      tool_calls?: any[];
+      isInternal?: boolean;
+      displayContent?: string;
     }>) => {
       const message: Message = {
         ...action.payload,
@@ -103,8 +107,9 @@ export const chatSlice = createSlice({
     addToolCallMessage: (state, action: PayloadAction<{
       toolName: string;
       args: any;
+      displayMessage: string;
     }>) => {
-      const { toolName, args } = action.payload;
+      const { toolName, args, displayMessage } = action.payload;
       
       // Complete the current assistant message first
       if (state.messages.length > 0) {
@@ -114,21 +119,10 @@ export const chatSlice = createSlice({
         }
       }
 
-      // Create appropriate tool message based on tool type
-      let content: string;
-      if (toolName === 'web_search') {
-        content = `🔍 Searching: "${args.query}"`;
-      } else if (toolName === 'scrape_url') {
-        content = `🔧 Scraping: "${args.url}"`;
-      } else if (toolName === 'file_writer') {
-        content = `💾 Writing: "${args.filename}"`;
-      } else {
-        content = `🔧 ${toolName}: ${JSON.stringify(args)}`;
-      }
-
       const toolMessage: Message = {
         role: 'tool',
-        content,
+        content: `Tool executed: ${toolName}`, // Generic content for LLM
+        displayContent: displayMessage, // User-friendly display
         toolName,
         toolArgs: args,
         timestamp: Date.now(),

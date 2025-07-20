@@ -1,10 +1,16 @@
-import { TodoistApi, Task, AddTaskArgs, AddProjectArgs } from '@doist/todoist-api-typescript';
+import {
+  TodoistApi,
+  Task,
+  AddTaskArgs,
+  AddProjectArgs,
+} from '@doist/todoist-api-typescript';
 import { z } from 'zod';
 import { createTool } from '../utils/toolInfra.js';
 
 export const TodoistCreateTaskTool = createTool({
   name: 'todoist_create_task',
-  description: 'Create a new task in Todoist',
+  description:
+    'Create a new task in Todoist. IMPORTANT: Always specify project_id when creating tasks for a specific project to organize them properly.',
   schema: z.object({
     content: z.string().min(1).describe('The task content/title'),
     description: z
@@ -14,12 +20,14 @@ export const TodoistCreateTaskTool = createTool({
     project_id: z
       .string()
       .optional()
-      .describe('Project ID to create the task in'),
+      .describe(
+        'REQUIRED for organizing tasks: The exact Project ID (numeric string) where this task should be created. Use the ID from todoist_create_project or todoist_get_projects.'
+      ),
     due_string: z
       .string()
       .optional()
       .describe(
-        'Due date in natural language (e.g., "tomorrow", "next Monday")'
+        'Due date in natural language. Examples: "tomorrow", "next Monday", "today at 3pm", "next week", "every Sunday", "no date" (to remove due date). Uses local time, up to 150 characters. Be specific and natural - Todoist parses human-readable dates very well.'
       ),
     priority: z
       .number()
@@ -48,11 +56,11 @@ export const TodoistCreateTaskTool = createTool({
     try {
       const taskArgs: AddTaskArgs = {
         content,
-        ...(description && { description }),
-        ...(project_id && { project_id }),
-        ...(due_string && { due_string }),
-        ...(priority && { priority }),
-        ...(labels && { labels }),
+        ...(description !== null && description !== undefined && { description }),
+        ...(project_id !== null && project_id !== undefined && { project_id }),
+        ...(due_string !== null && due_string !== undefined && { due_string }),
+        ...(priority !== null && priority !== undefined && { priority }),
+        ...(labels !== null && labels !== undefined && { labels }),
       };
 
       const task = await api.addTask(taskArgs);
@@ -116,10 +124,10 @@ export const TodoistGetTasksTool = createTool({
 
     try {
       const tasks = await api.getTasks({
-        ...(project_id && { projectId: project_id }),
-        ...(label_id && { label_id }),
-        ...(filter && { filter }),
-        ...(lang && { lang }),
+        ...(project_id !== null && project_id !== undefined && { projectId: project_id }),
+        ...(label_id !== null && label_id !== undefined && { label_id }),
+        ...(filter !== null && filter !== undefined && { filter }),
+        ...(lang !== null && lang !== undefined && { lang }),
       });
 
       if (tasks.results.length === 0) {
@@ -170,7 +178,8 @@ export const TodoistGetTasksTool = createTool({
 
 export const TodoistGetProjectsTool = createTool({
   name: 'todoist_get_projects',
-  description: 'Get all projects from Todoist',
+  description:
+    'Get all projects from Todoist with their Project IDs for use in task creation. IMPORTANT - always use this tool to get the correct project_id for the project you want to create a task in.',
   schema: z.object({}),
   execute: async ({}, config) => {
     const apiKey = config.todoist?.apiKey;
@@ -189,11 +198,13 @@ export const TodoistGetProjectsTool = createTool({
         return 'No projects found in your Todoist account.';
       }
 
-      const results: string[] = [`📂 Found ${projects.results.length} project(s):`];
+      const results: string[] = [
+        `📂 Found ${projects.results.length} project(s):`,
+      ];
 
       projects.results.forEach((project, index) => {
         results.push(`\n${index + 1}. **${project.name}**`);
-        results.push(`   ID: ${project.id}`);
+        results.push(`   Project ID: ${project.id}`);
         if (project.color) {
           results.push(`   Color: ${project.color}`);
         }
@@ -270,13 +281,12 @@ export const TodoistCompleteTaskTool = createTool({
 
 export const TodoistCreateProjectTool = createTool({
   name: 'todoist_create_project',
-  description: 'Create a new project in Todoist',
+  description:
+    'Create a new project in Todoist. Returns the project ID that should be used when creating tasks for this project.',
   schema: z.object({
     name: z.string().min(1).describe('The project name'),
-    color: z.string().optional().describe('Project color (e.g., "red", "blue", "green")'),
-    favorite: z.boolean().optional().describe('Whether to mark project as favorite'),
   }),
-  execute: async ({ name, color, favorite }, config) => {
+  execute: async ({ name }, config) => {
     const apiKey = config.todoist?.apiKey;
     if (!apiKey) {
       throw new Error(
@@ -289,17 +299,15 @@ export const TodoistCreateProjectTool = createTool({
     try {
       const projectArgs: AddProjectArgs = {
         name,
-        ...(color && { color }),
-        ...(favorite !== undefined && { favorite }),
       };
 
       const project = await api.addProject(projectArgs);
-      
+
       return `📂 Project created successfully:
 **${project.name}**
-- ID: ${project.id}
-- Color: ${project.color || 'Default'}
-- URL: ${project.url}`;
+- Project ID: ${project.id}
+
+🔗 IMPORTANT: Use Project ID "${project.id}" in the project_id field when creating tasks for this project.`;
     } catch (error) {
       if (error instanceof Error) {
         if (error.message.includes('401')) {
