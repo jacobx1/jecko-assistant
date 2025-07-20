@@ -34,6 +34,9 @@ export const WebSearchTool = createTool({
       .default(10)
       .describe('Number of results to return (1-20)'),
   }),
+  formatToolCall(params) {
+    return `Searching: ${params.query}`;
+  },
   execute: async ({ query, num_results }, config) => {
     const apiKey = config.serper.apiKey;
     const baseUrl = 'https://google.serper.dev/search';

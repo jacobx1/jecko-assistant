@@ -18,6 +18,7 @@ import { MessageList, type Message } from './components/MessageList.js';
 import { ChatInput, type Mode } from './components/ChatInput.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ActiveCommand } from './components/ActiveCommand.js';
+import { ActiveToolCalls } from './components/ActiveToolCalls.js';
 import { useContextUsage } from './hooks/useContextUsage.js';
 
 // Redux imports
@@ -37,6 +38,7 @@ import {
   markLastMessageComplete,
   addToolCallMessage,
   addStreamingAssistantMessage,
+  updateLastMessageWithToolCalls,
 } from './store/slices/chatSlice.js';
 import {
   setShowCommandSelector,
@@ -50,6 +52,9 @@ import {
   navigateCommandUp,
   navigateCommandDown,
   setActiveCommandJSX,
+  addActiveToolCall,
+  updateToolCallStatus,
+  clearActiveToolCalls,
 } from './store/slices/uiSlice.js';
 import { setCurrentUsage } from './store/slices/usageSlice.js';
 import { commandManager } from './utils/commandManager.js';
@@ -166,23 +171,68 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
     dispatch(setLoading(true));
 
     try {
-      // Add streaming assistant response placeholder
-      dispatch(addStreamingAssistantMessage());
+      // Only add streaming assistant message for Chat mode
+      if (mode === 'CHAT') {
+        dispatch(addStreamingAssistantMessage());
+      }
 
-      // Set up simplified streaming callbacks
-      const streamingCallbacks = {
+      // Set up streaming callbacks (Chat mode gets full callbacks, Agent mode gets minimal)
+      const streamingCallbacks = mode === 'CHAT' ? {
         onToken: (token: string) => {
           dispatch(appendTokenToLastMessage(token));
         },
         onComplete: () => {
           dispatch(markLastMessageComplete());
         },
-        onToolCall: (toolName: string, args: any, tool?: any) => {
-          const displayMessage = formatToolCallDisplay(toolName, args, tool);
-          dispatch(addToolCallMessage({ toolName, args, displayMessage }));
+        onToolCall: (toolCallId: string, toolName: string, args: any, tool?: any) => {
+          // Add real-time tool call indicator with actual OpenAI tool call ID
+          const displayText = formatToolCallDisplay(toolName, args, tool);
+          dispatch(addActiveToolCall({
+            id: toolCallId,
+            name: toolName,
+            args,
+            displayText,
+          }));
+        },
+        onToolCallComplete: (toolCallId: string, result: string, error?: string) => {
+          // Update tool call status when completed
+          dispatch(updateToolCallStatus({
+            id: toolCallId,
+            status: error ? 'error' : 'completed',
+            error,
+          }));
+        },
+        onToolCallsReady: (toolCalls: any[]) => {
+          // Update the current assistant message with tool calls
+          dispatch(updateLastMessageWithToolCalls(toolCalls));
         },
         onNewMessage: () => {
           dispatch(addStreamingAssistantMessage());
+        },
+        onUsage: (usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
+          dispatch(setCurrentUsage(usage));
+          // Check for auto-compaction after setting usage
+          setTimeout(() => checkAutoCompactionActual(), 100);
+        },
+      } : {
+        // Agent mode: Show tool calls but no streaming
+        onToolCall: (toolCallId: string, toolName: string, args: any, tool?: any) => {
+          // Add real-time tool call indicator
+          const displayText = formatToolCallDisplay(toolName, args, tool);
+          dispatch(addActiveToolCall({
+            id: toolCallId,
+            name: toolName,
+            args,
+            displayText,
+          }));
+        },
+        onToolCallComplete: (toolCallId: string, result: string, error?: string) => {
+          // Update tool call status when completed
+          dispatch(updateToolCallStatus({
+            id: toolCallId,
+            status: error ? 'error' : 'completed',
+            error,
+          }));
         },
         onUsage: (usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
           dispatch(setCurrentUsage(usage));
@@ -206,8 +256,9 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
               streamingCallbacks
             );
 
-      // Add any tool call messages from the response to Redux state
+      // Handle response based on mode and content
       if (response.messagesToAdd && response.messagesToAdd.length > 0) {
+        // Agent mode: Add all messages from agent iterations
         for (const msg of response.messagesToAdd) {
           // Skip system messages and internal messages from being added to Redux state
           if (msg.role === 'system' || msg.isInternal) {
@@ -222,6 +273,26 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
             tool_call_id: msg.tool_call_id,
             tool_calls: msg.tool_calls,
             isInternal: msg.isInternal,
+            displayContent: msg.displayContent,
+            isComplete: true,
+          }));
+        }
+        
+        // Clear active tool calls now that final messages are added
+        dispatch(clearActiveToolCalls());
+      } else if (response.content) {
+        // Simple responses (Chat mode or Agent mode without tools)
+        if (mode === 'CHAT') {
+          // Chat mode: Update the streaming assistant message with content
+          dispatch(updateLastMessage({
+            content: response.content,
+            isComplete: true,
+          }));
+        } else {
+          // Agent mode simple response: Add a new assistant message
+          dispatch(addMessage({
+            role: 'assistant',
+            content: response.content,
             isComplete: true,
           }));
         }
@@ -401,6 +472,8 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
         isLoading={isLoading}
         showInformationalHeader={showInformationalHeader}
       />
+
+      <ActiveToolCalls />
 
       <ChatInput
         input={input}

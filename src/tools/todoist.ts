@@ -15,30 +15,30 @@ export const TodoistCreateTaskTool = createTool({
     content: z.string().min(1).describe('The task content/title'),
     description: z
       .string()
-      .optional()
-      .describe('Additional details for the task'),
+      .nullable()
+      .describe('Additional details for the task (null if none)'),
     project_id: z
       .string()
-      .optional()
+      .nullable()
       .describe(
-        'REQUIRED for organizing tasks: The exact Project ID (numeric string) where this task should be created. Use the ID from todoist_create_project or todoist_get_projects.'
+        'REQUIRED for organizing tasks: The exact Project ID (numeric string) where this task should be created. Use the ID from todoist_create_project or todoist_get_projects. (null if none specified)'
       ),
     due_string: z
       .string()
-      .optional()
+      .nullable()
       .describe(
-        'Due date in natural language. Examples: "tomorrow", "next Monday", "today at 3pm", "next week", "every Sunday", "no date" (to remove due date). Uses local time, up to 150 characters. Be specific and natural - Todoist parses human-readable dates very well.'
+        'Due date in natural language. Examples: "tomorrow", "next Monday", "today at 3pm", "next week", "every Sunday", "no date" (to remove due date). Uses local time, up to 150 characters. Be specific and natural - Todoist parses human-readable dates very well. (null if no due date)'
       ),
     priority: z
       .number()
       .min(1)
       .max(4)
-      .optional()
-      .describe('Priority level (1-4, where 4 is urgent)'),
+      .nullable()
+      .describe('Priority level (1-4, where 4 is urgent, null for default priority)'),
     labels: z
       .array(z.string())
-      .optional()
-      .describe('Array of label names to assign to the task'),
+      .nullable()
+      .describe('Array of label names to assign to the task (null if no labels)'),
   }),
   execute: async (
     { content, description, project_id, due_string, priority, labels },
@@ -95,16 +95,16 @@ export const TodoistGetTasksTool = createTool({
   name: 'todoist_get_tasks',
   description: 'Get tasks from Todoist with optional filtering',
   schema: z.object({
-    project_id: z.string().optional().describe('Filter tasks by project ID'),
-    label_id: z.string().optional().describe('Filter tasks by label ID'),
+    project_id: z.string().nullable().describe('Filter tasks by project ID (null if no filter)'),
+    label_id: z.string().nullable().describe('Filter tasks by label ID (null if no filter)'),
     filter: z
       .string()
-      .optional()
-      .describe('Filter string (e.g., "today", "overdue", "p1")'),
+      .nullable()
+      .describe('Filter string (e.g., "today", "overdue", "p1") (null if no filter)'),
     lang: z
       .string()
-      .optional()
-      .describe('Language for natural language filters'),
+      .nullable()
+      .describe('Language for natural language filters (null if no specific language)'),
     limit: z
       .number()
       .min(1)

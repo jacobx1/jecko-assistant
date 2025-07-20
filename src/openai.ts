@@ -31,8 +31,19 @@ export interface ChatResponse {
 export interface StreamingCallbacks {
   onToken?: (token: string) => void;
   onComplete?: () => void;
-  onToolCall?: (toolName: string, args: any, tool?: Tool<any, any>) => void;
+  onToolCall?: (
+    toolCallId: string,
+    toolName: string,
+    args: any,
+    tool?: Tool<any, any>
+  ) => void;
   onNewMessage?: () => void; // Called when starting a new assistant message
+  onToolCallsReady?: (toolCalls: any[]) => void; // Called when tool calls are fully accumulated
+  onToolCallComplete?: (
+    toolCallId: string,
+    result: string,
+    error?: string
+  ) => void; // Called when tool execution completes
   onUsage?: (usage: {
     promptTokens: number;
     completionTokens: number;
@@ -268,6 +279,8 @@ Use tools when needed to provide accurate and up-to-date information.`,
 
         // Handle tool calls if any - DON'T call onComplete yet if we have tool calls
         if (toolCalls.length > 0) {
+          // Notify that tool calls are ready (so assistant message can be updated)
+          streamingCallbacks?.onToolCallsReady?.(toolCalls);
           const toolResult = await this.executeToolCalls(
             toolCalls,
             streamingCallbacks
@@ -379,6 +392,7 @@ Use tools when needed to provide accurate and up-to-date information.`,
       name: string;
       args: any;
       result: string;
+      displayContent?: string;
     }> = [];
 
     for (const toolCall of toolCalls) {
@@ -394,14 +408,18 @@ Use tools when needed to provide accurate and up-to-date information.`,
         const params = JSON.parse(toolCall.function.arguments);
 
         // Notify that we're making a tool call
-        streamingCallbacks?.onToolCall?.(toolName, params, tool);
+        streamingCallbacks?.onToolCall?.(toolCall.id, toolName, params, tool);
 
         const result = await tool.execute(params, this.config);
         toolCallResults.push({
           name: toolName,
           args: params,
           result: result,
+          displayContent: tool.formatToolCall?.(params),
         });
+
+        // Notify that tool execution completed
+        streamingCallbacks?.onToolCallComplete?.(toolCall.id, result);
       } catch (error) {
         let args = {};
         try {
@@ -414,13 +432,21 @@ Use tools when needed to provide accurate and up-to-date information.`,
         }
 
         // Notify about the tool call even if it fails
-        streamingCallbacks?.onToolCall?.(toolName, args, tool);
+        streamingCallbacks?.onToolCall?.(toolCall.id, toolName, args, tool);
 
+        const errorMessage = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
         toolCallResults.push({
           name: toolName,
           args: args,
-          result: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          result: errorMessage,
         });
+
+        // Notify that tool execution failed
+        streamingCallbacks?.onToolCallComplete?.(
+          toolCall.id,
+          errorMessage,
+          error instanceof Error ? error.message : 'Unknown error'
+        );
       }
     }
 
@@ -437,6 +463,7 @@ Use tools when needed to provide accurate and up-to-date information.`,
         role: 'tool',
         content: toolCallResults[index]?.result || 'Tool execution failed',
         tool_call_id: toolCall.id,
+        displayContent: toolCallResults[index]?.displayContent,
       })
     );
 

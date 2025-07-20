@@ -26,6 +26,9 @@ export const URLScraperTool = createTool({
       .default(true)
       .describe('Whether to include markdown formatting in the response'),
   }),
+  formatToolCall(params) {
+    return `Scraping: ${params.url}`;
+  },
   execute: async ({ url, includeMarkdown }, config) => {
     const apiKey = config.serper.apiKey;
     const baseUrl = 'https://scrape.serper.dev';
@@ -51,7 +54,7 @@ export const URLScraperTool = createTool({
       const response = await axios.request(config);
 
       // Validate response structure
-      const result = ScrapeResultSchema.parse(response.data);
+      const result = response.data as ScrapeResult;
 
       if (result.error) {
         throw new Error(`Scraping failed: ${result.error}`);
@@ -74,6 +77,7 @@ export const URLScraperTool = createTool({
 
       return formattedResult;
     } catch (error) {
+      console.error('Scraping error:', error);
       if (axios.isAxiosError(error)) {
         if (error.code === 'ECONNABORTED') {
           throw new Error('Scraping request timed out');

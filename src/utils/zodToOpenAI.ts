@@ -30,29 +30,39 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
     const required: string[] = [];
 
     for (const [key, fieldSchema] of Object.entries(shape)) {
-      // In strict mode, ALL properties are required
+      // In strict mode, ALL properties must be in the required array
       required.push(key);
-
-      // Check if this is an optional or default field
+      
+      // Check if this is an optional, nullable, or default field
       const isOptional = fieldSchema instanceof z.ZodOptional;
+      const isNullable = fieldSchema instanceof z.ZodNullable;
       const hasDefault = fieldSchema instanceof z.ZodDefault;
 
-      if (isOptional || hasDefault) {
-        // For optional properties, get the inner type and make it nullable
-        const innerProperty = zodSchemaToOpenAIProperty(
-          fieldSchema as z.ZodTypeAny
-        );
+      if (isOptional) {
+        // Optional fields are required in schema but can be null
+        const innerProperty = zodSchemaToOpenAIProperty(fieldSchema.unwrap());
         properties[key] = {
           ...innerProperty,
           type: Array.isArray(innerProperty.type)
             ? [...innerProperty.type, 'null']
             : [innerProperty.type, 'null'],
         };
+      } else if (isNullable) {
+        // Nullable fields can be null
+        const innerProperty = zodSchemaToOpenAIProperty(fieldSchema.unwrap());
+        properties[key] = {
+          ...innerProperty,
+          type: Array.isArray(innerProperty.type)
+            ? [...innerProperty.type, 'null']
+            : [innerProperty.type, 'null'],
+        };
+      } else if (hasDefault) {
+        // Default fields are required but use their default if not provided
+        const innerProperty = zodSchemaToOpenAIProperty(fieldSchema as z.ZodTypeAny);
+        properties[key] = innerProperty;
       } else {
-        // Required property - use as-is
-        properties[key] = zodSchemaToOpenAIProperty(
-          fieldSchema as z.ZodTypeAny
-        );
+        // Required property - must be present and non-null
+        properties[key] = zodSchemaToOpenAIProperty(fieldSchema as z.ZodTypeAny);
       }
     }
 
@@ -123,6 +133,17 @@ function zodSchemaToOpenAIProperty(schema: z.ZodTypeAny): OpenAIProperty {
   // Handle ZodOptional
   if (schema instanceof z.ZodOptional) {
     return zodSchemaToOpenAIProperty(schema.unwrap());
+  }
+
+  // Handle ZodNullable
+  if (schema instanceof z.ZodNullable) {
+    const innerProperty = zodSchemaToOpenAIProperty(schema.unwrap());
+    return {
+      ...innerProperty,
+      type: Array.isArray(innerProperty.type)
+        ? [...innerProperty.type, 'null']
+        : [innerProperty.type, 'null'],
+    };
   }
 
   // Handle ZodDefault

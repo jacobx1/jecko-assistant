@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, Static } from 'ink';
+import { Box, Text, Static,  } from 'ink';
 import { StreamingText } from './StreamingText.js';
 
 export interface Message {
@@ -18,7 +18,7 @@ export interface Message {
 
 // Memoized message component to prevent unnecessary re-renders
 const MessageItem = React.memo<{ message: Message; index: number }>(({ message }) => (
-  <Box marginBottom={1}>
+  <Box marginBottom={1} flexDirection={message.role === 'user' ? 'row' : 'column'}>
     <Text
       bold
       color={

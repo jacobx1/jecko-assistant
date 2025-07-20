@@ -76,8 +76,8 @@ export class AgentMode {
           }
         }
 
-        // Signal that we need a new assistant message for follow-up
-        streamingCallbacks?.onNewMessage?.();
+        // Don't signal onNewMessage in agent mode - proper messages will be added via messagesToAdd
+        // streamingCallbacks?.onNewMessage?.();
 
         // Add a continuation prompt to keep the agent going
         const remainingIterations = maxIterations - iteration;
@@ -132,9 +132,14 @@ export class AgentMode {
       responses.push('\n[Agent mode reached maximum iterations limit]');
     }
 
+    // Extract messages to add (skip the original user message and internal continuation messages)
+    const messagesToAdd = currentMessages.slice(messages.length).filter(msg => !msg.isInternal);
+
     return {
-      content: responses.join('\n\n'),
+      // Only return content if we don't have messagesToAdd (simple responses without tools)
+      content: messagesToAdd.length > 0 ? '' : responses.join('\n\n'),
       toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+      messagesToAdd: messagesToAdd.length > 0 ? messagesToAdd : undefined,
     };
   }
 }

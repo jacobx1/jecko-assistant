@@ -142,6 +142,15 @@ export const chatSlice = createSlice({
       };
       state.messages.push(message);
     },
+
+    updateLastMessageWithToolCalls: (state, action: PayloadAction<any[]>) => {
+      if (state.messages.length > 0) {
+        const lastMessage = state.messages[state.messages.length - 1];
+        if (lastMessage.role === 'assistant') {
+          lastMessage.tool_calls = action.payload;
+        }
+      }
+    },
   },
 });
 
@@ -159,4 +168,5 @@ export const {
   markLastMessageComplete,
   addToolCallMessage,
   addStreamingAssistantMessage,
+  updateLastMessageWithToolCalls,
 } = chatSlice.actions;

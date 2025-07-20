@@ -3,8 +3,9 @@ import { configCommand } from './config.js';
 import { toolsCommand } from './tools.js';
 import { compactCommand } from './compact.js';
 import { exitCommand } from './exit.js';
+import { debugCommand } from './debug.js';
 
-const commands: SlashCommand[] = [configCommand, toolsCommand, compactCommand, exitCommand];
+const commands: SlashCommand[] = [configCommand, toolsCommand, compactCommand, exitCommand, debugCommand];
 
 export function getAllCommands(): SlashCommand[] {
   return [...commands];
