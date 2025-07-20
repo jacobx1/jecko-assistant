@@ -24,7 +24,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@doist/todoist-api-typescript": "^5.0.2",
     "@modelcontextprotocol/sdk": "^1.15.0",
+    "@reduxjs/toolkit": "^2.8.2",
     "axios": "^1.7.2",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
@@ -35,6 +37,7 @@
     "openai": "^4.52.7",
     "ora": "^8.0.1",
     "react": "^19.1.0",
+    "react-redux": "^9.2.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

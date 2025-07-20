@@ -3,8 +3,10 @@
 import { Command } from 'commander';
 import { render } from 'ink';
 import React from 'react';
+import { Provider } from 'react-redux';
 import { loadConfig, createSampleConfig, getConfigPath } from './config.js';
 import { ChatApp } from './chat.js';
+import { store } from './store/index.js';
 import { startMCPServer } from './mcpServer.js';
 import chalk from 'chalk';
 import { writeFileSync } from 'fs';
@@ -69,13 +71,15 @@ program
     try {
       const config = await loadConfig();
       
-      // Create the app with cleanup callback
-      const app = React.createElement(ChatApp, { 
+      // Create the app with cleanup callback, wrapped in Redux Provider
+      const chatApp = React.createElement(ChatApp, { 
         config,
         onClientCreate: (disconnectFn: () => Promise<void>) => {
           cleanupFunctions.push(disconnectFn);
         }
       });
+      
+      const app = React.createElement(Provider, { store, children: chatApp });
       
       // Store the Ink instance for cleanup
       inkInstance = render(app);

@@ -3,7 +3,7 @@ import { OpenAIClient } from '../openai.js';
 interface Message {
   role: 'user' | 'assistant' | 'tool';
   content: string;
-  timestamp: Date;
+  timestamp: number;
   toolName?: string;
   toolArgs?: any;
 }
@@ -80,7 +80,7 @@ export class ConversationCompactor {
       const summaryMessage: Message = {
         role: 'assistant',
         content: `[Conversation Summary]\n${summaryResponse.content}`,
-        timestamp: new Date(),
+        timestamp: Date.now(),
       };
 
       // Combine summary with recent messages and any tool messages from the end

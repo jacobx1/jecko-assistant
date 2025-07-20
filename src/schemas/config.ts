@@ -16,6 +16,9 @@ export const ConfigSchema = z.object({
   serper: z.object({
     apiKey: z.string().min(1, 'Serper API key is required'),
   }),
+  todoist: z.object({
+    apiKey: z.string().min(1, 'Todoist API key is required'),
+  }).optional(),
   maxTokens: z.number().positive().default(4000),
   temperature: z.number().min(0).max(2).default(0.7),
   mcpServers: z.record(MCPServerSchema).optional().default({}),

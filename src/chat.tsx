@@ -1,61 +1,56 @@
-import React, { useState, useEffect, useCallback, JSX, useMemo } from 'react';
-import { Box, Text, useInput, useStdin, Static } from 'ink';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Box, useInput, useStdin } from 'ink';
 import { Config } from './schemas/config.js';
 import { OpenAIClient } from './openai.js';
-import { ChatMode, AgentMode } from './modes/index.js';
-import { CommandSelector } from './components/CommandSelector.js';
-import { StreamingText } from './components/StreamingText.js';
+import { ChatMode } from './modes/chat.js';
+import { AgentMode } from './modes/agent.js';
 import { getCommand, searchCommands } from './commands/registry.js';
 import { WebSearchTool } from './tools/serper.js';
 import { URLScraperTool } from './tools/scraper.js';
 import { FilerWriterTool } from './tools/fileWriter.js';
+import { TodoistCreateTaskTool, TodoistGetTasksTool, TodoistGetProjectsTool, TodoistCompleteTaskTool, TodoistCreateProjectTool } from './tools/todoist.js';
 import { ConversationCompactor } from './utils/compaction.js';
-import { CompactDisplay } from './commands/compact.js';
 
-export type Mode = 'CHAT' | 'AGENT';
+// Import new composable components
+import { MessageList, type Message } from './components/MessageList.js';
+import { ChatInput, type Mode } from './components/ChatInput.js';
+import { StatusBar } from './components/StatusBar.js';
+import { ActiveCommand } from './components/ActiveCommand.js';
+import { useContextUsage } from './hooks/useContextUsage.js';
 
-interface Message {
-  role: 'user' | 'assistant' | 'tool';
-  content: string;
-  timestamp: Date;
-  toolName?: string;
-  toolArgs?: any;
-  isStreaming?: boolean;
-  isComplete?: boolean;
-}
-
-// Memoized message component to prevent unnecessary re-renders
-const MessageItem = React.memo<{ message: Message; index: number }>(({ message }) => (
-  <Box marginBottom={1}>
-    <Text
-      bold
-      color={
-        message.role === 'user'
-          ? 'green'
-          : message.role === 'tool'
-            ? 'yellow'
-            : 'blue'
-      }
-    >
-      {message.role === 'user'
-        ? '> '
-        : message.role === 'tool'
-          ? '🔧 '
-          : 'Assistant: '}
-    </Text>
-    <Box>
-      {message.role === 'assistant' && message.isStreaming ? (
-        <StreamingText text={message.content} />
-      ) : message.role === 'assistant' ? (
-        <StreamingText text={message.content} />
-      ) : (
-        <Text color={message.role === 'tool' ? 'yellow' : 'white'}>
-          {message.content}
-        </Text>
-      )}
-    </Box>
-  </Box>
-));
+// Redux imports
+import { useAppDispatch, useAppSelector } from './store/hooks.js';
+import { store } from './store/index.js';
+import {
+  addMessage,
+  updateLastMessage,
+  setMessages,
+  toggleMode,
+  setLoading,
+  setInput,
+  clearInput,
+  appendToInput,
+  removeLastInputChar,
+  appendTokenToLastMessage,
+  markLastMessageComplete,
+  addToolCallMessage,
+  addStreamingAssistantMessage,
+} from './store/slices/chatSlice.js';
+import {
+  setShowCommandSelector,
+  setCommandQuery,
+  setSelectedCommandIndex,
+  setActiveCommand,
+  showCommandSelector as showCommandSelectorAction,
+  hideCommandSelector,
+  appendToCommandQuery,
+  removeLastCommandChar,
+  navigateCommandUp,
+  navigateCommandDown,
+  setActiveCommandJSX,
+} from './store/slices/uiSlice.js';
+import { setCurrentUsage } from './store/slices/usageSlice.js';
+import { commandManager } from './utils/commandManager.js';
 
 interface ChatAppProps {
   config: Config;
@@ -63,72 +58,49 @@ interface ChatAppProps {
 }
 
 export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClientCreate }) => {
-  const [mode, setMode] = useState<Mode>('CHAT');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  // Redux state
+  const dispatch = useAppDispatch();
+  const { messages, mode, isLoading, input } = useAppSelector((state) => state.chat);
+  const { showCommandSelector, commandQuery, selectedCommandIndex, activeCommand, hasActiveCommandJSX } = useAppSelector((state) => state.ui);
+  const { currentUsage } = useAppSelector((state) => state.usage);
+
+  // Local state that doesn't need Redux
   const [config, setConfig] = useState(initialConfig);
   const [openaiClient, setOpenaiClient] = useState(
-    () => new OpenAIClient(initialConfig, [WebSearchTool, URLScraperTool, FilerWriterTool])
+    () => new OpenAIClient(initialConfig, [WebSearchTool, URLScraperTool, FilerWriterTool, TodoistCreateTaskTool, TodoistGetTasksTool, TodoistGetProjectsTool, TodoistCompleteTaskTool, TodoistCreateProjectTool])
   );
-  const [showCommandSelector, setShowCommandSelector] = useState(false);
-  const [commandQuery, setCommandQuery] = useState('/');
-  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
-  const [activeCommand, setActiveCommand] = useState<JSX.Element | null>(null);
-  const [currentUsage, setCurrentUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(null);
   const [compactor] = useState(() => new ConversationCompactor(openaiClient));
   const { isRawModeSupported } = useStdin();
 
-  // Get model context window size
-  const getContextWindowSize = (model: string): number => {
-    const contextWindows: Record<string, number> = {
-      'gpt-4o': 128000,
-      'gpt-4o-mini': 128000,
-      'gpt-4-turbo': 128000,
-      'gpt-4': 8192,
-      'gpt-3.5-turbo': 16385,
-      'o1-preview': 128000,
-      'o1-mini': 128000,
-      'gpt-4.1': 1000000,         // 1M tokens
-      'gpt-4.1-mini': 1000000,   // 1M tokens
-      'gpt-4.1-nano': 1000000,   // 1M tokens
-    };
-    return contextWindows[model] || 8192; // Default fallback
-  };
-
-  // Calculate context usage percentage - memoized to prevent re-calculations
-  const contextUsageInfo = useMemo(() => {
-    if (!currentUsage) return null;
-    const contextWindow = getContextWindowSize(config.openai.model);
-    const usedPercentage = Math.round((currentUsage.totalTokens / contextWindow) * 100);
-    const remainingPercentage = Math.max(0, 100 - usedPercentage);
-    return {
-      used: currentUsage.totalTokens,
-      total: contextWindow,
-      usedPercentage,
-      remainingPercentage,
-    };
-  }, [currentUsage, config.openai.model]);
+  // Use the custom hook for context usage calculation
+  const contextUsageInfo = useContextUsage(currentUsage, config.openai.model);
 
   // Manual compaction function
   const performCompaction = async (): Promise<void> => {
     if (messages.length === 0) return;
     
-    setIsLoading(true);
+    dispatch(setLoading(true));
     try {
       const result = await compactor.compact(messages);
-      setMessages(result.compactedMessages);
+      dispatch(setMessages(result.compactedMessages));
       
       // Show compaction result
-      setActiveCommand(<CompactDisplay result={result} />);
+      dispatch(setActiveCommand({
+        type: 'compact',
+        data: { compactionResult: result }
+      }));
       
       // Clear usage to force recalculation on next response
-      setCurrentUsage(null);
+      dispatch(setCurrentUsage({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }));
     } catch (error) {
       console.error('Compaction failed:', error);
-      addMessage('assistant', '❌ Compaction failed. Please try again.', undefined, undefined, false, true);
+      dispatch(addMessage({
+        role: 'assistant',
+        content: '❌ Compaction failed. Please try again.',
+        isComplete: true,
+      }));
     } finally {
-      setIsLoading(false);
+      dispatch(setLoading(false));
     }
   };
 
@@ -160,150 +132,57 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
     };
   }, [openaiClient, onClientCreate]);
 
-  const addMessage = useCallback(
-    (
-      role: 'user' | 'assistant' | 'tool',
-      content: string,
-      toolName?: string,
-      toolArgs?: any,
-      isStreaming?: boolean,
-      isComplete?: boolean
-    ) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role,
-          content,
-          timestamp: new Date(),
-          toolName,
-          toolArgs,
-          isStreaming,
-          isComplete: isComplete !== undefined ? isComplete : !isStreaming,
-        },
-      ]);
-    },
-    []
-  );
 
-  // Update the auto-compaction function now that addMessage is defined
+  // Auto-compaction function
   const checkAutoCompactionActual = useCallback(async (): Promise<void> => {
     if (contextUsageInfo && contextUsageInfo.remainingPercentage <= 10 && messages.length > 6) {
-      addMessage('assistant', '⚠️ Context space is running low (10% remaining). Auto-compacting conversation...', undefined, undefined, false, true);
+      dispatch(addMessage({
+        role: 'assistant',
+        content: '⚠️ Context space is running low (10% remaining). Auto-compacting conversation...',
+        isComplete: true,
+      }));
       await performCompaction();
-      addMessage('assistant', '✅ Auto-compaction completed. Conversation history has been summarized.', undefined, undefined, false, true);
+      dispatch(addMessage({
+        role: 'assistant',
+        content: '✅ Auto-compaction completed. Conversation history has been summarized.',
+        isComplete: true,
+      }));
     }
-  }, [contextUsageInfo, messages.length, addMessage, performCompaction]);
+  }, [contextUsageInfo, messages.length, dispatch, performCompaction]);
 
-  const updateLastMessage = useCallback(
-    (content: string, isComplete: boolean = false) => {
-      setMessages((prev) => {
-        const newMessages = [...prev];
-        if (newMessages.length > 0) {
-          const lastMessage = newMessages[newMessages.length - 1];
-          newMessages[newMessages.length - 1] = {
-            ...lastMessage,
-            content,
-            isComplete,
-            isStreaming: !isComplete,
-          };
-        }
-        return newMessages;
-      });
-    },
-    []
-  );
 
   const handleSubmit = useCallback(async () => {
     if (!input.trim() || isLoading || showCommandSelector) return;
 
     const userMessage = input.trim();
-    setInput('');
-    addMessage('user', userMessage);
-    setIsLoading(true);
+    dispatch(clearInput());
+    dispatch(addMessage({
+      role: 'user',
+      content: userMessage,
+      isComplete: true,
+    }));
+    dispatch(setLoading(true));
 
     try {
       // Add streaming assistant response placeholder
-      addMessage('assistant', '', undefined, undefined, true);
+      dispatch(addStreamingAssistantMessage());
 
-      // Set up streaming callbacks
+      // Set up simplified streaming callbacks
       const streamingCallbacks = {
         onToken: (token: string) => {
-          setMessages((prev) => {
-            const newMessages = [...prev];
-            if (newMessages.length > 0) {
-              const lastMessage = newMessages[newMessages.length - 1];
-              if (lastMessage.role === 'assistant') {
-                newMessages[newMessages.length - 1] = {
-                  ...lastMessage,
-                  content: lastMessage.content + token,
-                  isStreaming: true,
-                  isComplete: false,
-                };
-              }
-            }
-            return newMessages;
-          });
+          dispatch(appendTokenToLastMessage(token));
         },
         onComplete: () => {
-          setMessages((prev) => {
-            const newMessages = [...prev];
-            if (newMessages.length > 0) {
-              const lastMessage = newMessages[newMessages.length - 1];
-              if (lastMessage.role === 'assistant') {
-                newMessages[newMessages.length - 1] = {
-                  ...lastMessage,
-                  isStreaming: false,
-                  isComplete: true,
-                };
-              }
-            }
-            return newMessages;
-          });
+          dispatch(markLastMessageComplete());
         },
         onToolCall: (toolName: string, args: any) => {
-          // Complete the current assistant message first
-          setMessages((prev) => {
-            const newMessages = [...prev];
-            if (newMessages.length > 0) {
-              const lastMessage = newMessages[newMessages.length - 1];
-              if (lastMessage.role === 'assistant') {
-                newMessages[newMessages.length - 1] = {
-                  ...lastMessage,
-                  isStreaming: false,
-                  isComplete: true,
-                };
-              }
-            }
-            return newMessages;
-          });
-
-          // Add tool call indicator immediately when tool is executed
-          if (toolName === 'web_search') {
-            addMessage('tool', `🔍 Searching: "${args.query}"`, toolName, args);
-          } else if (toolName === 'scrape_url') {
-            addMessage('tool', `🔧 Scraping: "${args.url}"`, toolName, args);
-          } else if (toolName === 'file_writer') {
-            addMessage(
-              'tool',
-              `💾 Writing: "${args.filename}"`,
-              toolName,
-              args
-            );
-          } else {
-            addMessage(
-              'tool',
-              `🔧 ${toolName}: ${JSON.stringify(args)}`,
-              toolName,
-              args
-            );
-          }
+          dispatch(addToolCallMessage({ toolName, args }));
         },
         onNewMessage: () => {
-          // Create a new streaming assistant message for the follow-up response
-          addMessage('assistant', '', undefined, undefined, true);
+          dispatch(addStreamingAssistantMessage());
         },
         onUsage: (usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
-          setCurrentUsage(usage);
+          dispatch(setCurrentUsage(usage));
           // Check for auto-compaction after setting usage
           setTimeout(() => checkAutoCompactionActual(), 100);
         },
@@ -324,12 +203,13 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
               streamingCallbacks
             );
     } catch (error) {
-      addMessage(
-        'assistant',
-        `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      dispatch(addMessage({
+        role: 'assistant',
+        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        isComplete: true,
+      }));
     } finally {
-      setIsLoading(false);
+      dispatch(setLoading(false));
     }
   }, [
     input,
@@ -337,23 +217,21 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
     mode,
     openaiClient,
     messages,
-    addMessage,
-    updateLastMessage,
     showCommandSelector,
     checkAutoCompactionActual,
+    dispatch,
   ]);
 
-  const toggleMode = useCallback(() => {
-    setMode((prev) => (prev === 'CHAT' ? 'AGENT' : 'CHAT'));
-  }, []);
+  const toggleModeCallback = useCallback(() => {
+    dispatch(toggleMode());
+  }, [dispatch]);
 
   const handleCommandSelect = useCallback(
     async (commandName: string) => {
       const command = getCommand(commandName);
       if (command) {
-        setShowCommandSelector(false);
-        setInput('');
-        setCommandQuery('/');
+        dispatch(hideCommandSelector());
+        dispatch(clearInput());
 
         // Handle compact command specially
         if (commandName === 'compact') {
@@ -363,18 +241,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
 
         // Handle exit command specially
         if (commandName === 'exit') {
-          setActiveCommand(
-            <Box flexDirection="column" paddingX={2} paddingY={1}>
-              <Box marginBottom={1}>
-                <Text bold color="cyan">
-                  👋 Goodbye!
-                </Text>
-              </Box>
-              <Text color="gray">
-                Thanks for using Jecko Assistant. Exiting...
-              </Text>
-            </Box>
-          );
+          dispatch(setActiveCommand({ type: 'exit' }));
           setTimeout(async () => {
             await openaiClient.disconnect();
             process.exit(0);
@@ -384,28 +251,32 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
 
         const result = await command.execute(config, (newConfig) => {
           setConfig(newConfig);
-          setOpenaiClient(new OpenAIClient(newConfig, [WebSearchTool, URLScraperTool, FilerWriterTool]));
-          setActiveCommand(null); // Close command after saving
+          setOpenaiClient(new OpenAIClient(newConfig, [WebSearchTool, URLScraperTool, FilerWriterTool, TodoistCreateTaskTool, TodoistGetTasksTool, TodoistGetProjectsTool, TodoistCompleteTaskTool, TodoistCreateProjectTool]));
+          // Close command after saving
+          dispatch(setActiveCommandJSX(false));
+          commandManager.clear();
         });
 
         if (result) {
-          setActiveCommand(result);
+          // Store JSX in command manager and track in Redux
+          commandManager.setCommand(result);
+          dispatch(setActiveCommandJSX(true));
         }
       }
     },
-    [config, performCompaction]
+    [config, performCompaction, dispatch, openaiClient]
   );
 
   const handleCommandCancel = useCallback(() => {
-    setShowCommandSelector(false);
-    setInput('');
-    setCommandQuery('/');
-    setSelectedCommandIndex(0);
-  }, []);
+    dispatch(hideCommandSelector());
+    dispatch(clearInput());
+  }, [dispatch]);
 
   const handleCommandExit = useCallback(() => {
-    setActiveCommand(null);
-  }, []);
+    dispatch(setActiveCommand({ type: null }));
+    dispatch(setActiveCommandJSX(false));
+    commandManager.clear();
+  }, [dispatch]);
 
   useInput((input: string, key: any) => {
     // Enhanced Ctrl+C handling
@@ -418,7 +289,7 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
     }
 
     // If we're in an active command, let it handle the input
-    if (activeCommand) {
+    if (hasActiveCommandJSX || activeCommand.type) {
       if (key.escape) {
         handleCommandExit();
       }
@@ -431,18 +302,13 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
         // Get current matches and move up
         const currentMatches = searchCommands(commandQuery);
         if (currentMatches.length > 0) {
-          const currentIndex = Math.max(0, selectedCommandIndex - 1);
-          setSelectedCommandIndex(currentIndex);
+          dispatch(navigateCommandUp(currentMatches.length));
         }
       } else if (key.downArrow) {
         // Get current matches and move down
         const currentMatches = searchCommands(commandQuery);
         if (currentMatches.length > 0) {
-          const currentIndex = Math.min(
-            currentMatches.length - 1,
-            selectedCommandIndex + 1
-          );
-          setSelectedCommandIndex(currentIndex);
+          dispatch(navigateCommandDown(currentMatches.length));
         }
       } else if (key.return) {
         // Select current command
@@ -462,13 +328,13 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
         if (newQuery === '' || newQuery.length === 0) {
           handleCommandCancel();
         } else {
-          setCommandQuery(newQuery);
-          setSelectedCommandIndex(0);
+          dispatch(setCommandQuery(newQuery));
+          dispatch(setSelectedCommandIndex(0));
         }
       } else if (input && !key.ctrl && !key.meta) {
         const newQuery = commandQuery + input;
-        setCommandQuery(newQuery);
-        setSelectedCommandIndex(0);
+        dispatch(setCommandQuery(newQuery));
+        dispatch(setSelectedCommandIndex(0));
       }
       return;
     }
@@ -476,109 +342,57 @@ export const ChatApp: React.FC<ChatAppProps> = ({ config: initialConfig, onClien
     if (key.return) {
       handleSubmit();
     } else if (key.shift && key.tab) {
-      toggleMode();
+      toggleModeCallback();
     } else if (key.backspace || key.delete) {
-      setInput((prev) => prev.slice(0, -1));
+      dispatch(removeLastInputChar());
     } else if (input && !key.ctrl && !key.meta) {
       // Check if we just typed a slash to trigger command selector
       if (input === '/') {
-        setShowCommandSelector(true);
-        setCommandQuery('/');
-        setSelectedCommandIndex(0);
-        setInput(''); // Clear main input since CommandSelector will handle it
+        dispatch(showCommandSelectorAction());
+        dispatch(clearInput()); // Clear main input since CommandSelector will handle it
       } else {
-        setInput((prev) => prev + input);
+        dispatch(appendToInput(input));
       }
     }
   });
 
   // If there's an active command, render it
-  if (activeCommand) {
-    return activeCommand;
+  if (hasActiveCommandJSX) {
+    const commandJSX = commandManager.getCommand();
+    if (commandJSX) {
+      return commandJSX;
+    }
+  }
+  
+  if (activeCommand.type) {
+    return <ActiveCommand activeCommand={activeCommand} />;
   }
 
   const showInformationalHeader = messages.length === 0 && !showCommandSelector;
 
   return (
     <Box flexDirection="column" height="100%">
-      {/* Header */}
-     {showInformationalHeader && (
-      <Box borderStyle="single" paddingX={1} marginBottom={1}>
-        <Text bold color="cyan">
-          Jecko Assistant
-        </Text>
-      </Box>
-     )}
+      <MessageList
+        messages={messages}
+        isLoading={isLoading}
+        showInformationalHeader={showInformationalHeader}
+      />
 
-      {/* Messages */}
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
-        {/* Show welcome message only when there are no messages and not in command mode */}
-        {showInformationalHeader && (
-          <Box flexDirection="column">
-            <Text color="gray">
-              Welcome! Type a message and press Enter to start.
-            </Text>
-            <Text color="gray">Type / to see available commands.</Text>
-          </Box>
-        )}
-        
-        {/* Use Static for completed messages to prevent re-renders - only when we have messages */}
-        {messages.length > 0 && (
-          <Static items={messages.filter(msg => msg.isComplete !== false)}>
-            {(msg, idx) => (
-              <MessageItem key={`${msg.timestamp.getTime()}-${idx}`} message={msg} index={idx} />
-            )}
-          </Static>
-        )}
-        
-        {/* Render streaming/incomplete messages separately */}
-        {messages
-          .filter(msg => msg.isComplete === false || msg.isStreaming)
-          .map((msg, idx) => (
-            <MessageItem key={`streaming-${msg.timestamp.getTime()}-${idx}`} message={msg} index={idx} />
-          ))}
-        
-        {isLoading && (
-          <Box>
-            <Text color="yellow">Assistant is thinking...</Text>
-          </Box>
-        )}
-      </Box>
+      <ChatInput
+        input={input}
+        mode={mode}
+        showCommandSelector={showCommandSelector}
+        commandQuery={commandQuery}
+        selectedCommandIndex={selectedCommandIndex}
+        showInformationalHeader={showInformationalHeader}
+      />
 
-      {/* Input or Command Selector */}
-      {showCommandSelector ? (
-        <Box borderStyle="single" paddingX={1}>
-          <CommandSelector
-            query={commandQuery}
-            selectedIndex={selectedCommandIndex}
-          />
-        </Box>
-      ) : (
-        <Box borderStyle="single" paddingX={1}>
-          <Text color="green">{'> '}</Text>
-          <Text>{input}</Text>
-          <Text color="gray">█</Text>
-        </Box>
-      )}
-
-      {/* Status bar */}
-      <Box justifyContent="space-between" paddingX={1}>
-        <Text color="cyan">Mode: {mode}</Text>
-        <Box>
-          {contextUsageInfo ? (
-            <Text color={contextUsageInfo.usedPercentage > 80 ? 'red' : 
-                         contextUsageInfo.usedPercentage > 60 ? 'yellow' : 'green'}>
-              {contextUsageInfo.remainingPercentage}% context remaining
-            </Text>
-          ) : (
-            <Text color="gray">
-              {showCommandSelector
-                ? 'Command Mode'
-                : 'Shift+Tab to switch • / for commands'}
-            </Text>
-          )}
-        </Box>
-      </Box>
+      <StatusBar
+        mode={mode}
+        contextUsageInfo={contextUsageInfo}
+        showCommandSelector={showCommandSelector}
+        showInformationalHeader={showInformationalHeader}
+      />
     </Box>
   );
 };
